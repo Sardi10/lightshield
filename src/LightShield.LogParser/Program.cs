@@ -2,7 +2,7 @@
 using System.IO;
 using System.Diagnostics;
 using System.Threading;
-using System.Security;           // for SecurityExceptio
+using System.Security;           // for SecurityException
 
 namespace LightShield.LogParser
 {
