@@ -1,0 +1,13 @@
+@LightShield.Api_HostAddress = https://localhost:5213
+
+### Test POST to Events API
+POST {{LightShield.Api_HostAddress}}/api/events
+Content-Type: application/json
+
+{
+  "source": "agent",
+  "type": "FileCreated",
+  "pathOrMessage": "/tmp/foo.txt",
+  "timestamp": "2025-05-17T20:00:00Z",
+  "hostname": "MY-PC"
+}
