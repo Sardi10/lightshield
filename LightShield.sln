@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LightShield.Agent", "src\Li
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LightShield.LogParser", "src\LightShield.LogParser\LightShield.LogParser.csproj", "{308B8E09-A393-4326-8954-C46356220E67}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LightShield.Api", "src\LightShield.Api\LightShield.Api.csproj", "{6F713A82-C84C-4B8B-8EEB-D77A128301F7}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -43,6 +45,18 @@ Global
 		{308B8E09-A393-4326-8954-C46356220E67}.Release|x64.Build.0 = Release|Any CPU
 		{308B8E09-A393-4326-8954-C46356220E67}.Release|x86.ActiveCfg = Release|Any CPU
 		{308B8E09-A393-4326-8954-C46356220E67}.Release|x86.Build.0 = Release|Any CPU
+		{6F713A82-C84C-4B8B-8EEB-D77A128301F7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6F713A82-C84C-4B8B-8EEB-D77A128301F7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6F713A82-C84C-4B8B-8EEB-D77A128301F7}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{6F713A82-C84C-4B8B-8EEB-D77A128301F7}.Debug|x64.Build.0 = Debug|Any CPU
+		{6F713A82-C84C-4B8B-8EEB-D77A128301F7}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{6F713A82-C84C-4B8B-8EEB-D77A128301F7}.Debug|x86.Build.0 = Debug|Any CPU
+		{6F713A82-C84C-4B8B-8EEB-D77A128301F7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6F713A82-C84C-4B8B-8EEB-D77A128301F7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6F713A82-C84C-4B8B-8EEB-D77A128301F7}.Release|x64.ActiveCfg = Release|Any CPU
+		{6F713A82-C84C-4B8B-8EEB-D77A128301F7}.Release|x64.Build.0 = Release|Any CPU
+		{6F713A82-C84C-4B8B-8EEB-D77A128301F7}.Release|x86.ActiveCfg = Release|Any CPU
+		{6F713A82-C84C-4B8B-8EEB-D77A128301F7}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -50,5 +64,6 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{3B09865D-7EEB-4CCF-8FC4-5A9BE93C6BFD} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{308B8E09-A393-4326-8954-C46356220E67} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{6F713A82-C84C-4B8B-8EEB-D77A128301F7} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal
