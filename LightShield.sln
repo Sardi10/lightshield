@@ -7,6 +7,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LightShield.Agent", "src\LightShield.Agent\LightShield.Agent.csproj", "{3B09865D-7EEB-4CCF-8FC4-5A9BE93C6BFD}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LightShield.LogParser", "src\LightShield.LogParser\LightShield.LogParser.csproj", "{308B8E09-A393-4326-8954-C46356220E67}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -29,11 +31,24 @@ Global
 		{3B09865D-7EEB-4CCF-8FC4-5A9BE93C6BFD}.Release|x64.Build.0 = Release|Any CPU
 		{3B09865D-7EEB-4CCF-8FC4-5A9BE93C6BFD}.Release|x86.ActiveCfg = Release|Any CPU
 		{3B09865D-7EEB-4CCF-8FC4-5A9BE93C6BFD}.Release|x86.Build.0 = Release|Any CPU
+		{308B8E09-A393-4326-8954-C46356220E67}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{308B8E09-A393-4326-8954-C46356220E67}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{308B8E09-A393-4326-8954-C46356220E67}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{308B8E09-A393-4326-8954-C46356220E67}.Debug|x64.Build.0 = Debug|Any CPU
+		{308B8E09-A393-4326-8954-C46356220E67}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{308B8E09-A393-4326-8954-C46356220E67}.Debug|x86.Build.0 = Debug|Any CPU
+		{308B8E09-A393-4326-8954-C46356220E67}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{308B8E09-A393-4326-8954-C46356220E67}.Release|Any CPU.Build.0 = Release|Any CPU
+		{308B8E09-A393-4326-8954-C46356220E67}.Release|x64.ActiveCfg = Release|Any CPU
+		{308B8E09-A393-4326-8954-C46356220E67}.Release|x64.Build.0 = Release|Any CPU
+		{308B8E09-A393-4326-8954-C46356220E67}.Release|x86.ActiveCfg = Release|Any CPU
+		{308B8E09-A393-4326-8954-C46356220E67}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{3B09865D-7EEB-4CCF-8FC4-5A9BE93C6BFD} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{308B8E09-A393-4326-8954-C46356220E67} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal
