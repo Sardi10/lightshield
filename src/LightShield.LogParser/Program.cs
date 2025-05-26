@@ -1,4 +1,4 @@
-﻿//  ../src/LightShield.LogParser/Program.cs
+﻿// ../src/LightShield.LogParser/Program.cs
 
 using System;
 using System.IO;
