@@ -1,5 +1,7 @@
 ﻿// src/LightShield.Api/Controllers/EventsController.cs
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using LightShield.Api.Data;
 using LightShield.Api.Models;
 
 namespace LightShield.Api.Controllers
@@ -8,16 +10,36 @@ namespace LightShield.Api.Controllers
     [Route("api/[controller]")]
     public class EventsController : ControllerBase
     {
-        [HttpPost]
-        public IActionResult Post([FromBody] Event evt)
+        private readonly EventsDbContext _db;
+
+        public EventsController(EventsDbContext db)
         {
-            // For now just log to console
+            _db = db;
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> Post([FromBody] Event evt)
+        {
+            // 1) Persist to the database
+            _db.Events.Add(evt);
+            await _db.SaveChangesAsync();
+
+            // 2) Log to console for debugging
             Console.WriteLine(
                 $"[{evt.Timestamp:o}] {evt.Source}:{evt.Type} → {evt.PathOrMessage} @ {evt.Hostname}"
             );
 
-            // TODO: persist to DB, apply anomaly rules, etc.
+            // 3) Return 202 Accepted
             return Accepted();
+        }
+
+        [HttpGet]
+        public async Task<IEnumerable<Event>> Get()
+        {
+            return await _db.Events
+                            .OrderByDescending(e => e.Timestamp)
+                            .Take(50)
+                            .ToListAsync();
         }
     }
 }

@@ -1,10 +1,15 @@
 ﻿// src/LightShield.Api/Models/Event.cs
 using System;
+using System.ComponentModel.DataAnnotations;
+
 
 namespace LightShield.Api.Models
 {
     public class Event
     {
+        [Key]
+        public int Id { get; set; }
+
         // "agent" or "logparser"
         public string Source { get; set; }
 
