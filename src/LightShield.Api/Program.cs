@@ -1,12 +1,28 @@
+using LightShield.Api.Data;
+using Microsoft.EntityFrameworkCore;
+
+
 var builder = WebApplication.CreateBuilder(args);
 
 // 1) Register controllers
 builder.Services.AddControllers();
 
+// Register SQLite
+builder.Services.AddDbContext<EventsDbContext>(opts =>
+    opts.UseSqlite("Data Source=lightshield.db"));
+
+
 // 2) (Optional) Keep OpenAPI/Swagger if you like
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
+
+// Ensure DB & migrations are applied on startup
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<EventsDbContext>();
+    db.Database.Migrate();
+}
 
 // 3) Enable Swagger UI in development
 if (app.Environment.IsDevelopment())

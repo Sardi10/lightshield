@@ -1,0 +1,14 @@
+﻿using System;
+using Microsoft.EntityFrameworkCore;
+using LightShield.Api.Models;
+
+namespace LightShield.Api.Data
+{
+    public class EventsDbContext : DbContext
+    {
+        public EventsDbContext(DbContextOptions<EventsDbContext> options)
+            : base(options) { }
+
+        public DbSet<Event> Events { get; set; } = default!;
+    }
+}
