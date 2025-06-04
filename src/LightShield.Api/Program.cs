@@ -1,4 +1,5 @@
 using LightShield.Api.Data;
+using LightShield.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 
@@ -6,6 +7,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 // 1) Register controllers
 builder.Services.AddControllers();
+
+builder.Services.AddHostedService<AnomalyDetectionService>();
 
 // Register SQLite
 builder.Services.AddDbContext<EventsDbContext>(opts =>
