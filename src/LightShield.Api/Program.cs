@@ -1,13 +1,21 @@
 using LightShield.Api.Data;
 using LightShield.Api.Services;
 using Microsoft.EntityFrameworkCore;
+using LightShield.Api.Services.Alerts;
+using DotNetEnv;
 
+Env.Load();
 
 var builder = WebApplication.CreateBuilder(args);
 
 // 1) Register controllers
 builder.Services.AddControllers();
 
+// Alerting: register both SMS and SMTP, then composite
+builder.Services.AddScoped<TwilioAlertService>();
+builder.Services.AddScoped<SmtpAlertService>();
+builder.Services.AddScoped<IAlertService, CompositeAlertService>();
+// Hosted service for burst detection (will use the composite)
 builder.Services.AddHostedService<AnomalyDetectionService>();
 
 // Register SQLite
@@ -17,6 +25,7 @@ builder.Services.AddDbContext<EventsDbContext>(opts =>
 
 // 2) (Optional) Keep OpenAPI/Swagger if you like
 builder.Services.AddOpenApi();
+
 
 var app = builder.Build();
 
