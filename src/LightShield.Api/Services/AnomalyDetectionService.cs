@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using LightShield.Api.Data;
 using LightShield.Api.Models;
+using LightShield.Api.Services.Alerts;
 
 namespace LightShield.Api.Services
 {
@@ -54,7 +55,9 @@ namespace LightShield.Api.Services
             try
             {
                 using var scope = _scopeFactory.CreateScope();
+                // resolve your DB and alert service from the same scope
                 var db = scope.ServiceProvider.GetRequiredService<EventsDbContext>();
+                var alertService = scope.ServiceProvider.GetRequiredService<IAlertService>();
 
                 // 1) Define the 5-minute window
                 var since = DateTime.UtcNow.AddMinutes(-5);
@@ -74,7 +77,8 @@ namespace LightShield.Api.Services
                         {
                             Type = "FailedLoginBurst",
                             Description = $"{group.Count()} failed logins in last 5 minutes",
-                            Hostname = group.Key
+                            Hostname = group.Key,
+                            Timestamp = DateTime.UtcNow
                         };
 
                         db.Anomalies.Add(anomaly);
@@ -84,6 +88,17 @@ namespace LightShield.Api.Services
                             "Anomaly detected: {Description} on host {Hostname}",
                             anomaly.Description,
                             anomaly.Hostname);
+
+                        var alertMsg = $"[LightShield] {anomaly.Type} on {anomaly.Hostname} @ {anomaly.Timestamp:o}";
+                        try
+                        {
+                            await alertService.SendAlertAsync(alertMsg);
+                            _logger.LogInformation("Alert sent: {AlertMsg}", alertMsg);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to send alert for anomaly {AnomalyId}", anomaly.Id);
+                        }
                     }
                 }
             }
