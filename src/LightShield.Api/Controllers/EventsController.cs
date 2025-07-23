@@ -1,5 +1,7 @@
 ﻿// src/LightShield.Api/Controllers/EventsController.cs
 
+// src/LightShield.Api/Controllers/EventsController.cs
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -35,31 +37,32 @@ namespace LightShield.Api.Controllers
         [HttpPost]
         public async Task<IActionResult> Post([FromBody] Event evt)
         {
-            // 1) Overwrite any client‐supplied timestamp
+            // 1) Normalize & overwrite timestamp + type
             evt.Timestamp = DateTime.UtcNow;
+            var rawType = evt.Type ?? "";
+            var normalizedType = rawType.Trim().ToLowerInvariant();
+            evt.Type = normalizedType;
 
-            // 2) Persist the incoming event (honor cancellation)
+            // 2) Persist
             _db.Events.Add(evt);
             await _db.SaveChangesAsync(HttpContext.RequestAborted);
 
-            // 3) Normalize and log the event type
-            var rawType = evt.Type ?? "(null)";
-            var normalizedType = rawType.Trim().ToLowerInvariant();
             _logger.LogDebug(
-                "Received event.Type = \"{RawType}\" (normalized = \"{NormalizedType}\")",
+                "Received event.Type = \"{Raw}\" → stored as \"{Norm}\"",
                 rawType, normalizedType
             );
 
-            // 4) Log the saved event’s details
+            // 3) Log the saved event’s details
             _logger.LogInformation(
-                "[{Timestamp:O}] {Source}:{RawType} → {PathOrMessage} @ {Hostname}",
-                evt.Timestamp, evt.Source, rawType, evt.PathOrMessage, evt.Hostname
+                "[{Timestamp:O}] {Source}:{Type} → {PathOrMessage} @ {Hostname}",
+                evt.Timestamp, evt.Source, normalizedType, evt.PathOrMessage, evt.Hostname
             );
 
-            // 5) Run the immediate‐trigger anomaly logic
-            await CheckImmediateThresholdsAsync(evt, normalizedType, HttpContext.RequestAborted);
+            // 4) Run immediate-trigger logic
+            await CheckImmediateThresholdsAsync(
+                evt, normalizedType, HttpContext.RequestAborted
+            );
 
-            // 6) Return 202 Accepted
             return Accepted();
         }
 
@@ -74,67 +77,53 @@ namespace LightShield.Api.Controllers
 
         private async Task CheckImmediateThresholdsAsync(
             Event evt,
-            string normalizedType,
-            CancellationToken cancellationToken)
+            string type,
+            CancellationToken ct)
         {
-            // Only examine our four types
-            if (normalizedType is not "failedlogin"
-                        and not "filecreate"
-                        and not "filemodify"
-                        and not "filedelete")
+            // only these four
+            if (type is not "failedlogin"
+                     and not "filecreate"
+                     and not "filemodify"
+                     and not "filedelete")
             {
-                _logger.LogDebug(
-                    "Skipping immediate check for event type {Type}",
-                    normalizedType
-                );
+                _logger.LogDebug("Skipping check for {Type}", type);
                 return;
             }
 
-            var serverNow = evt.Timestamp;
-            var since = serverNow.AddMinutes(-5);
+            var since = evt.Timestamp.AddMinutes(-5);
 
-            // Count each event type in the last 5 minutes
+            // now we can compare directly, no ToLower calls
             var failedLoginCount = await _db.Events
-                .Where(e =>
-                    e.Type.ToLowerInvariant() == "failedlogin" &&
-                    e.Hostname == evt.Hostname &&
-                    e.Timestamp >= since)
-                .CountAsync(cancellationToken);
+                .Where(e => e.Type == "failedlogin"
+                         && e.Hostname == evt.Hostname
+                         && e.Timestamp >= since)
+                .CountAsync(ct);
 
             var fileCreateCount = await _db.Events
-                .Where(e =>
-                    e.Type.ToLowerInvariant() == "filecreate" &&
-                    e.Hostname == evt.Hostname &&
-                    e.Timestamp >= since)
-                .CountAsync(cancellationToken);
+                .Where(e => e.Type == "filecreate"
+                         && e.Hostname == evt.Hostname
+                         && e.Timestamp >= since)
+                .CountAsync(ct);
 
             var fileModifyCount = await _db.Events
-                .Where(e =>
-                    e.Type.ToLowerInvariant() == "filemodify" &&
-                    e.Hostname == evt.Hostname &&
-                    e.Timestamp >= since)
-                .CountAsync(cancellationToken);
+                .Where(e => e.Type == "filemodify"
+                         && e.Hostname == evt.Hostname
+                         && e.Timestamp >= since)
+                .CountAsync(ct);
 
             var fileDeleteCount = await _db.Events
-                .Where(e =>
-                    e.Type.ToLowerInvariant() == "filedelete" &&
-                    e.Hostname == evt.Hostname &&
-                    e.Timestamp >= since)
-                .CountAsync(cancellationToken);
+                .Where(e => e.Type == "filedelete"
+                         && e.Hostname == evt.Hostname
+                         && e.Timestamp >= since)
+                .CountAsync(ct);
 
-            _logger.LogDebug(
-                "Counts since {Since:O} → FailedLogin={FailedLogin}, FileCreate={Create}, FileModify={Modify}, FileDelete={Delete}",
-                since, failedLoginCount, fileCreateCount, fileModifyCount, fileDeleteCount
-            );
-
-            // Evaluate in priority order
             if (fileModifyCount >= 100)
                 await InsertIfNotDuplicateAsync(
                     evt.Hostname,
                     "SevereFileModifyBurst",
                     $"{fileModifyCount} file modifications in last 5 minutes (≥100)",
-                    serverNow,
-                    cancellationToken
+                    evt.Timestamp,
+                    ct
                 );
 
             if (fileDeleteCount >= 20)
@@ -142,8 +131,8 @@ namespace LightShield.Api.Controllers
                     evt.Hostname,
                     "SevereFileDeleteBurst",
                     $"{fileDeleteCount} file deletions in last 5 minutes (≥20)",
-                    serverNow,
-                    cancellationToken
+                    evt.Timestamp,
+                    ct
                 );
 
             if (fileCreateCount >= 75)
@@ -151,8 +140,8 @@ namespace LightShield.Api.Controllers
                     evt.Hostname,
                     "SevereFileCreateBurst",
                     $"{fileCreateCount} file creations in last 5 minutes (≥75)",
-                    serverNow,
-                    cancellationToken
+                    evt.Timestamp,
+                    ct
                 );
 
             if (failedLoginCount >= 15)
@@ -160,8 +149,8 @@ namespace LightShield.Api.Controllers
                     evt.Hostname,
                     "SevereFailedLoginBurst",
                     $"{failedLoginCount} failed logins in last 5 minutes (≥15)",
-                    serverNow,
-                    cancellationToken
+                    evt.Timestamp,
+                    ct
                 );
         }
 
@@ -169,59 +158,55 @@ namespace LightShield.Api.Controllers
             string hostname,
             string anomalyType,
             string description,
-            DateTime serverNow,
-            CancellationToken cancellationToken)
+            DateTime detectedAt,
+            CancellationToken ct)
         {
-            // Dedup within last 60 seconds
-            var duplicateExists = await _db.Anomalies
-                .Where(a =>
-                    a.Type.ToLowerInvariant() == anomalyType.ToLowerInvariant() &&
-                    a.Hostname == hostname &&
-                    a.Timestamp >= serverNow.AddSeconds(-60))
-                .AnyAsync(cancellationToken);
+            var exists = await _db.Anomalies
+                .Where(a => a.Type == anomalyType
+                         && a.Hostname == hostname
+                         && a.Timestamp >= detectedAt.AddSeconds(-60))
+                .AnyAsync(ct);
 
-            if (duplicateExists)
+            if (exists)
             {
                 _logger.LogDebug(
-                    "Duplicate {AnomalyType} for host {Hostname} within 60s; skipping",
+                    "Duplicate {Type} for {Host} in last minute, skipping",
                     anomalyType, hostname
                 );
                 return;
             }
 
-            // Insert the new anomaly
             var anomaly = new Anomaly
             {
                 Type = anomalyType,
                 Description = description,
                 Hostname = hostname,
-                Timestamp = serverNow
+                Timestamp = detectedAt
             };
 
             _db.Anomalies.Add(anomaly);
-            await _db.SaveChangesAsync(cancellationToken);
+            await _db.SaveChangesAsync(ct);
 
             _logger.LogWarning(
-                "Anomaly detected: {Description} on host {Hostname}",
+                "Anomaly detected: {Desc} on {Host}",
                 anomaly.Description, anomaly.Hostname
             );
 
-            // Send alert
             var alertMsg = $"[LightShield] {anomaly.Type} on {anomaly.Hostname} @ {anomaly.Timestamp:O}";
             try
             {
                 await _alertService.SendAlertAsync(alertMsg);
-                _logger.LogInformation("Alert sent: {AlertMsg}", alertMsg);
+                _logger.LogInformation("Alert sent: {Msg}", alertMsg);
             }
             catch (Exception ex)
             {
                 _logger.LogError(
                     ex,
-                    "Failed sending alert for anomaly {AnomalyType} on host {Hostname}",
-                    anomaly.Type,
-                    anomaly.Hostname
+                    "Failed sending alert for {Type} on {Host}",
+                    anomaly.Type, anomaly.Hostname
                 );
             }
         }
     }
 }
+
