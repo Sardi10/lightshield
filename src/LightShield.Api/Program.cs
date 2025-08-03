@@ -2,7 +2,10 @@ using LightShield.Api.Data;
 using LightShield.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using LightShield.Api.Services.Alerts;
+using LightShield.Api.Models;
 using DotNetEnv;
+using Microsoft.Data.Sqlite;
+using System.IO;
 
 Env.Load();
 
@@ -18,9 +21,13 @@ builder.Services.AddScoped<IAlertService, CompositeAlertService>();
 // Hosted service for burst detection (will use the composite)
 builder.Services.AddHostedService<AnomalyDetectionService>();
 
+var contentRoot = Directory.GetCurrentDirectory();
+var dbPath = Path.Combine(contentRoot, "lightshield.db");
+var connBuilder = new SqliteConnectionStringBuilder { DataSource = dbPath };
+
 // Register SQLite
 builder.Services.AddDbContext<EventsDbContext>(opts =>
-    opts.UseSqlite("Data Source=lightshield.db"));
+    opts.UseSqlite(connBuilder.ToString()));
 
 
 // 2) (Optional) Keep OpenAPI/Swagger if you like
@@ -33,6 +40,11 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<EventsDbContext>();
+
+    // Force WAL  main file merge
+    db.Database.ExecuteSqlRaw("PRAGMA wal_checkpoint(FULL);");
+
+    // Apply any pending migrations
     db.Database.Migrate();
 }
 

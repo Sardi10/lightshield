@@ -12,5 +12,7 @@ namespace LightShield.Api.Data
         public DbSet<Event> Events { get; set; } = default!;
 
         public DbSet<Anomaly> Anomalies { get; set; }
+
+        public DbSet<UserConfiguration> Configurations { get; set; }
     }
 }
