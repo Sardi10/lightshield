@@ -11,6 +11,20 @@ Env.Load();
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Add CORS before AddControllers:
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("LocalDev", policy =>
+    {
+        policy.WithOrigins("http://localhost:5173",
+                           "http://127.0.0.1:5173",
+                           "tauri://localhost"
+                           )  // your Vite dev URL
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+
 // 1) Register controllers
 builder.Services.AddControllers();
 
@@ -36,6 +50,9 @@ builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
+// Use CORS *before* UseAuthorization:
+app.UseCors("LocalDev");
+
 // Ensure DB & migrations are applied on startup
 using (var scope = app.Services.CreateScope())
 {
@@ -54,8 +71,12 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-// 4) Enforce HTTPS (already there)
-app.UseHttpsRedirection();
+// 4) Enforce HTTPS 
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
+
 
 // 5) Map controller routes
 app.MapControllers();
