@@ -3,8 +3,10 @@ using System.ComponentModel.DataAnnotations;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using LightShield.Api.Data;
+using LightShield.Api.Dtos;
 using LightShield.Api.Models;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace LightShield.Api.Controllers
 {
@@ -13,46 +15,142 @@ namespace LightShield.Api.Controllers
     public class ConfigurationController : ControllerBase
     {
         private readonly EventsDbContext _db;
+        public ConfigurationController(EventsDbContext db) => _db = db;
 
-        public ConfigurationController(EventsDbContext db)
+        public class ContactsRequest
         {
-            _db = db;
+            public string PhoneNumber { get; set; } = "";
+            public string Email { get; set; } = "";
         }
 
-        public class ConfigurationRequest
+        // Defaults used only on first GET (no row yet)
+        private static readonly UserConfiguration Defaults = new()
         {
-            public string PhoneNumber { get; set; } = null!;
-            public string Email { get; set; } = null!;
+            MaxFailedLogins = 15,
+            MaxFileDeletes = 20,
+            MaxFileCreates = 75,
+            MaxFileModifies = 100,
+            PhoneNumber = "",
+            Email = ""
+        };
+
+        [HttpGet]
+        public async Task<ActionResult<ConfigurationDto>> Get()
+        {
+            var cfg = await _db.Configurations.AsNoTracking().FirstOrDefaultAsync();
+            if (cfg == null)
+            {
+                cfg = new UserConfiguration
+                {
+                    MaxFailedLogins = Defaults.MaxFailedLogins,
+                    MaxFileDeletes = Defaults.MaxFileDeletes,
+                    MaxFileCreates = Defaults.MaxFileCreates,
+                    MaxFileModifies = Defaults.MaxFileModifies,
+                    PhoneNumber = Defaults.PhoneNumber,
+                    Email = Defaults.Email,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                _db.Configurations.Add(cfg);
+                await _db.SaveChangesAsync();
+            }
+            return Ok(ToDto(cfg));
+        }
+
+        [HttpPut]
+        public async Task<ActionResult<ConfigurationDto>> Put([FromBody] ConfigurationDto req)
+        {
+            // validate thresholds
+            if (req.MaxFailedLogins < 0 || req.MaxFileDeletes < 0 || req.MaxFileCreates < 0 || req.MaxFileModifies < 0)
+                return BadRequest("Thresholds must be non-negative.");
+
+            // validate contacts if present
+            if (!string.IsNullOrWhiteSpace(req.Email) && !new EmailAddressAttribute().IsValid(req.Email))
+                return BadRequest("Invalid email address.");
+
+            if (!string.IsNullOrWhiteSpace(req.PhoneNumber) && !Regex.IsMatch(req.PhoneNumber, @"^\+\d{8,15}$"))
+                return BadRequest("Phone must be E.164 (e.g., +15551234567).");
+
+            var cfg = await _db.Configurations.FirstOrDefaultAsync();
+            if (cfg == null)
+            {
+                cfg = new UserConfiguration
+                {
+                    MaxFailedLogins = req.MaxFailedLogins,
+                    MaxFileDeletes = req.MaxFileDeletes,
+                    MaxFileCreates = req.MaxFileCreates,
+                    MaxFileModifies = req.MaxFileModifies,
+                    PhoneNumber = req.PhoneNumber ?? "",
+                    Email = req.Email ?? "",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                _db.Configurations.Add(cfg);
+            }
+            else
+            {
+                cfg.MaxFailedLogins = req.MaxFailedLogins;
+                cfg.MaxFileDeletes = req.MaxFileDeletes;
+                cfg.MaxFileCreates = req.MaxFileCreates;
+                cfg.MaxFileModifies = req.MaxFileModifies;
+                cfg.PhoneNumber = req.PhoneNumber ?? "";
+                cfg.Email = req.Email ?? "";
+                cfg.UpdatedAt = DateTime.UtcNow;
+            }
+
+            await _db.SaveChangesAsync();
+            return Ok(ToDto(cfg));
         }
 
         [HttpPost]
-        public async Task<IActionResult> Post([FromBody] ConfigurationRequest req)
+        public async Task<IActionResult> Post([FromBody] ContactsRequest req)
         {
-            // Phone must be E.164: +<country><number>, 10–15 digits
-            if (string.IsNullOrWhiteSpace(req.PhoneNumber) ||
-                !Regex.IsMatch(req.PhoneNumber, @"^\+\d{10,15}$"))
+            if (string.IsNullOrWhiteSpace(req.Email) || !new EmailAddressAttribute().IsValid(req.Email))
+                return BadRequest(new { error = "Invalid email address." });
+
+            if (string.IsNullOrWhiteSpace(req.PhoneNumber) || !Regex.IsMatch(req.PhoneNumber, @"^\+\d{10,15}$"))
+                return BadRequest(new { error = "Phone must be E.164 (e.g. +15551234567)." });
+
+            var cfg = await _db.Configurations.FirstOrDefaultAsync();
+            if (cfg == null)
             {
-                return BadRequest("Phone number must be in E.164 format (e.g. +15551234567).");
+                cfg = new UserConfiguration
+                {
+                    MaxFailedLogins = 15,
+                    MaxFileDeletes = 20,
+                    MaxFileCreates = 75,
+                    MaxFileModifies = 100,
+                    PhoneNumber = req.PhoneNumber,
+                    Email = req.Email,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                _db.Configurations.Add(cfg);
+            }
+            else
+            {
+                cfg.PhoneNumber = req.PhoneNumber;
+                cfg.Email = req.Email;
+                cfg.UpdatedAt = DateTime.UtcNow;
             }
 
-            // Email validation
-            if (string.IsNullOrWhiteSpace(req.Email) ||
-                !new EmailAddressAttribute().IsValid(req.Email))
-            {
-                return BadRequest("Invalid email address.");
-            }
-
-            var config = new UserConfiguration
-            {
-                PhoneNumber = req.PhoneNumber,
-                Email = req.Email,
-                CreatedAt = DateTime.UtcNow
-            };
-
-            _db.Configurations.Add(config);
             await _db.SaveChangesAsync();
 
+            // Minimal response; onboarding ignores content
             return Ok(new { message = "Configuration saved successfully." });
         }
+
+        private static ConfigurationDto ToDto(UserConfiguration u) => new()
+        {
+            Id = u.Id,
+            MaxFailedLogins = u.MaxFailedLogins,
+            MaxFileDeletes = u.MaxFileDeletes,
+            MaxFileCreates = u.MaxFileCreates,
+            MaxFileModifies = u.MaxFileModifies,
+            PhoneNumber = u.PhoneNumber,
+            Email = u.Email,
+            CreatedAt = u.CreatedAt,
+            UpdatedAt = u.UpdatedAt
+        };
     }
 }
