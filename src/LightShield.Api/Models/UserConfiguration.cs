@@ -6,11 +6,18 @@ namespace LightShield.Api.Models
     {
         public int Id { get; set; }
 
-        // E.164 format: +15551234567
-        public string PhoneNumber { get; set; } = null!;
+        // thresholds (editable)
+        public int MaxFailedLogins { get; set; }
+        public int MaxFileDeletes { get; set; }
+        public int MaxFileCreates { get; set; }
+        public int MaxFileModifies { get; set; }
 
-        public string Email { get; set; } = null!;
+        // contacts (editable)
+        public string PhoneNumber { get; set; } = string.Empty; // E.164
+        public string Email { get; set; } = string.Empty;
 
+        // metadata
         public DateTime CreatedAt { get; set; }
+        public DateTime UpdatedAt { get; set; }
     }
 }

@@ -13,6 +13,6 @@ namespace LightShield.Api.Data
 
         public DbSet<Anomaly> Anomalies { get; set; }
 
-        public DbSet<UserConfiguration> Configurations { get; set; }
+        public DbSet<UserConfiguration> Configurations { get; set; } = null!;
     }
 }
