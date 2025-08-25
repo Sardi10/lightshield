@@ -34,6 +34,7 @@ builder.Services.AddScoped<SmtpAlertService>();
 builder.Services.AddScoped<IAlertService, CompositeAlertService>();
 // Hosted service for burst detection (will use the composite)
 builder.Services.AddHostedService<AnomalyDetectionService>();
+builder.Services.AddScoped<ConfigurationService>();
 
 var contentRoot = Directory.GetCurrentDirectory();
 var dbPath = Path.Combine(contentRoot, "lightshield.db");
