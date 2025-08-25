@@ -15,12 +15,9 @@ export default function Dashboard() {
             })
             .then((json: unknown) => {
                 let list: Anomaly[] = []
-                // If it's already an array
                 if (Array.isArray(json)) {
                     list = json as Anomaly[]
-                }
-                // Or if it's wrapped in { items: Anomaly[] }
-                else if (
+                } else if (
                     typeof json === 'object' &&
                     json !== null &&
                     'items' in json &&
@@ -40,9 +37,16 @@ export default function Dashboard() {
     return (
         <div className="p-8 max-w-2xl mx-auto">
             <h1 className="text-2xl font-semibold mb-4">Anomalies</h1>
-            <Link to="/" className="text-blue-600 hover:underline mb-4 inline-block">
-                ← Back to Onboarding
-            </Link>
+
+            <div className="mb-4 space-x-4">
+                <Link to="/" className="text-blue-600 hover:underline">
+                    ← Back to Onboarding
+                </Link>
+                <Link to="/config" className="text-blue-600 hover:underline">
+                    ⚙️ Edit Configuration
+                </Link>
+            </div>
+
             {loading ? (
                 <p>Loading…</p>
             ) : anomalies.length === 0 ? (
