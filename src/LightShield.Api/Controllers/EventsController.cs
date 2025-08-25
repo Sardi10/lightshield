@@ -13,6 +13,7 @@ using Microsoft.Extensions.Logging;
 using LightShield.Api.Data;
 using LightShield.Api.Models;
 using LightShield.Api.Services.Alerts;
+using LightShield.Api.Services;
 
 namespace LightShield.Api.Controllers
 {
@@ -23,15 +24,18 @@ namespace LightShield.Api.Controllers
         private readonly EventsDbContext _db;
         private readonly IAlertService _alertService;
         private readonly ILogger<EventsController> _logger;
+        private readonly ConfigurationService _configService;
 
         public EventsController(
             EventsDbContext db,
             IAlertService alertService,
+            ConfigurationService configService,
             ILogger<EventsController> logger)
         {
             _db = db;
             _alertService = alertService;
             _logger = logger;
+            _configService = configService; 
         }
 
         [HttpPost]
@@ -76,11 +80,10 @@ namespace LightShield.Api.Controllers
         }
 
         private async Task CheckImmediateThresholdsAsync(
-            Event evt,
-            string type,
-            CancellationToken ct)
+    Event evt,
+    string type,
+    CancellationToken ct)
         {
-            // only these four
             if (type is not "failedlogin"
                      and not "filecreate"
                      and not "filemodify"
@@ -92,7 +95,6 @@ namespace LightShield.Api.Controllers
 
             var since = evt.Timestamp.AddMinutes(-5);
 
-            // now we can compare directly, no ToLower calls
             var failedLoginCount = await _db.Events
                 .Where(e => e.Type == "failedlogin"
                          && e.Hostname == evt.Hostname
@@ -117,42 +119,49 @@ namespace LightShield.Api.Controllers
                          && e.Timestamp >= since)
                 .CountAsync(ct);
 
-            if (fileModifyCount >= 100)
+            // ✅ thresholds from ConfigurationService
+            var modifyThreshold = await _configService.GetFileEditThresholdAsync();
+            var deleteThreshold = await _configService.GetFileDeleteThresholdAsync();
+            var createThreshold = await _configService.GetFileCreateThresholdAsync();
+            var loginThreshold = await _configService.GetFailedLoginThresholdAsync();
+
+            if (fileModifyCount >= modifyThreshold)
                 await InsertIfNotDuplicateAsync(
                     evt.Hostname,
                     "SevereFileModifyBurst",
-                    $"{fileModifyCount} file modifications in last 5 minutes (≥100)",
+                    $"{fileModifyCount} file modifications in last 5 minutes (≥{modifyThreshold})",
                     evt.Timestamp,
                     ct
                 );
 
-            if (fileDeleteCount >= 20)
+            if (fileDeleteCount >= deleteThreshold)
                 await InsertIfNotDuplicateAsync(
                     evt.Hostname,
                     "SevereFileDeleteBurst",
-                    $"{fileDeleteCount} file deletions in last 5 minutes (≥20)",
+                    $"{fileDeleteCount} file deletions in last 5 minutes (≥{deleteThreshold})",
                     evt.Timestamp,
                     ct
                 );
 
-            if (fileCreateCount >= 75)
+            if (fileCreateCount >= createThreshold)
                 await InsertIfNotDuplicateAsync(
                     evt.Hostname,
                     "SevereFileCreateBurst",
-                    $"{fileCreateCount} file creations in last 5 minutes (≥75)",
+                    $"{fileCreateCount} file creations in last 5 minutes (≥{createThreshold})",
                     evt.Timestamp,
                     ct
                 );
 
-            if (failedLoginCount >= 15)
+            if (failedLoginCount >= loginThreshold)
                 await InsertIfNotDuplicateAsync(
                     evt.Hostname,
                     "SevereFailedLoginBurst",
-                    $"{failedLoginCount} failed logins in last 5 minutes (≥15)",
+                    $"{failedLoginCount} failed logins in last 5 minutes (≥{loginThreshold})",
                     evt.Timestamp,
                     ct
                 );
         }
+
 
         private async Task InsertIfNotDuplicateAsync(
             string hostname,
