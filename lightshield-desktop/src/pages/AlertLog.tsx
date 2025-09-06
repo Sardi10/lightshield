@@ -10,6 +10,7 @@ interface AlertLog {
 
 export default function AlertLog() {
     const [alerts, setAlerts] = useState<AlertLog[]>([]);
+    const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
     useEffect(() => {
         const fetchAlerts = async () => {
@@ -17,6 +18,7 @@ export default function AlertLog() {
                 const res = await fetch("http://localhost:5213/api/alerts");
                 const data = await res.json();
                 setAlerts(data);
+                setLastUpdated(new Date());
             } catch (err) {
                 console.error("Failed to load alerts:", err);
             }
@@ -27,10 +29,12 @@ export default function AlertLog() {
         return () => clearInterval(interval);
     }, []);
 
+    if (!alerts.length) return <p>No alerts found.</p>;
+
     return (
-        <div className="p-4">
+        <div>
             <h2 className="text-xl font-semibold mb-2">Alert History</h2>
-            <table className="w-full border-collapse border border-gray-300 text-sm">
+            <table className="w-full border-collapse border border-gray-300 text-sm mb-2">
                 <thead>
                     <tr className="bg-gray-100">
                         <th className="border p-2">Timestamp</th>
@@ -52,6 +56,11 @@ export default function AlertLog() {
                     ))}
                 </tbody>
             </table>
+            {lastUpdated && (
+                <p className="text-xs text-gray-500">
+                    Last updated: {lastUpdated.toLocaleTimeString()}
+                </p>
+            )}
         </div>
     );
 }
