@@ -11,6 +11,7 @@ interface Event {
 
 export default function EventStream() {
     const [events, setEvents] = useState<Event[]>([]);
+    const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
     useEffect(() => {
         const fetchEvents = async () => {
@@ -18,6 +19,7 @@ export default function EventStream() {
                 const res = await fetch("http://localhost:5213/api/events");
                 const data = await res.json();
                 setEvents(data);
+                setLastUpdated(new Date());
             } catch (err) {
                 console.error("Failed to load events:", err);
             }
@@ -28,10 +30,12 @@ export default function EventStream() {
         return () => clearInterval(interval);
     }, []);
 
+    if (!events.length) return <p>No events found.</p>;
+
     return (
-        <div className="p-4">
+        <div>
             <h2 className="text-xl font-semibold mb-2">Live Event Stream</h2>
-            <table className="w-full border-collapse border border-gray-300 text-sm">
+            <table className="w-full border-collapse border border-gray-300 text-sm mb-2">
                 <thead>
                     <tr className="bg-gray-100">
                         <th className="border p-2">Timestamp</th>
@@ -55,6 +59,11 @@ export default function EventStream() {
                     ))}
                 </tbody>
             </table>
+            {lastUpdated && (
+                <p className="text-xs text-gray-500">
+                    Last updated: {lastUpdated.toLocaleTimeString()}
+                </p>
+            )}
         </div>
     );
 }
