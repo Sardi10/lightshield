@@ -1,9 +1,7 @@
-// src/LightShield.Api/Controllers/AlertsController.cs
-
-using System;
-using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
-using LightShield.Api.Services.Alerts;
+using Microsoft.EntityFrameworkCore;
+using LightShield.Api.Data;
+using LightShield.Api.Models;
 
 namespace LightShield.Api.Controllers
 {
@@ -11,19 +9,20 @@ namespace LightShield.Api.Controllers
     [Route("api/[controller]")]
     public class AlertsController : ControllerBase
     {
-        private readonly IAlertService _alertService;
+        private readonly EventsDbContext _db;
 
-        public AlertsController(IAlertService alertService)
+        public AlertsController(EventsDbContext db)
         {
-            _alertService = alertService;
+            _db = db;
         }
 
-        [HttpPost("test")]
-        public async Task<IActionResult> SendTestAlert()
+        [HttpGet]
+        public async Task<IEnumerable<Alert>> Get()
         {
-            var msg = $"[LightShield TEST] alert generated at {DateTime.UtcNow:O}";
-            await _alertService.SendAlertAsync(msg);
-            return Ok("Test alert sent (SMS + email).");
+            return await _db.Alerts
+                .OrderByDescending(a => a.Timestamp)
+                .Take(50)
+                .ToListAsync();
         }
     }
 }
