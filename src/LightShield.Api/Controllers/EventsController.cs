@@ -164,12 +164,13 @@ namespace LightShield.Api.Controllers
 
 
         private async Task InsertIfNotDuplicateAsync(
-            string hostname,
-            string anomalyType,
-            string description,
-            DateTime detectedAt,
-            CancellationToken ct)
+    string hostname,
+    string anomalyType,
+    string description,
+    DateTime detectedAt,
+    CancellationToken ct)
         {
+            // Prevent duplicate anomalies within the last minute
             var exists = await _db.Anomalies
                 .Where(a => a.Type == anomalyType
                          && a.Hostname == hostname
@@ -185,6 +186,7 @@ namespace LightShield.Api.Controllers
                 return;
             }
 
+            // Create and persist anomaly record
             var anomaly = new Anomaly
             {
                 Type = anomalyType,
@@ -201,11 +203,24 @@ namespace LightShield.Api.Controllers
                 anomaly.Description, anomaly.Hostname
             );
 
+            // Build alert message
             var alertMsg = $"[LightShield] {anomaly.Type} on {anomaly.Hostname} @ {anomaly.Timestamp:O}";
             try
             {
+                // Send alert via configured services (SMS/Email)
                 await _alertService.SendAlertAsync(alertMsg);
-                _logger.LogInformation("Alert sent: {Msg}", alertMsg);
+
+                // ✅ Persist alert into database
+                _db.Alerts.Add(new Alert
+                {
+                    Timestamp = DateTime.UtcNow,
+                    Type = anomaly.Type,
+                    Message = alertMsg,
+                    Channel = "SMS/Email" // later: split if you want separate records
+                });
+                await _db.SaveChangesAsync(ct);
+
+                _logger.LogInformation("Alert sent and logged: {Msg}", alertMsg);
             }
             catch (Exception ex)
             {
@@ -216,6 +231,7 @@ namespace LightShield.Api.Controllers
                 );
             }
         }
+
     }
 }
 

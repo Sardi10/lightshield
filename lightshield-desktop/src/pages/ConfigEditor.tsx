@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 type Config = {
     id?: number;
@@ -69,12 +70,19 @@ export default function ConfigEditor() {
         }
     };
 
-    if (loading) return <div className="p-4">Loading�</div>;
+    if (loading) return <div className="p-4">Loading…</div>;
     if (!cfg) return <div className="p-4 text-red-600">{error ?? "No configuration found."}</div>;
 
     return (
         <form onSubmit={save} className="p-6 max-w-3xl space-y-6">
             <h1 className="text-2xl font-semibold">Configuration</h1>
+
+            {/* ✅ Back to Dashboard button at top */}
+            <div className="mb-4">
+                <Link to="/dashboard" className="text-blue-600 hover:underline">
+                    ← Back to Dashboard
+                </Link>
+            </div>
 
             {error && <div className="p-3 bg-red-100 border border-red-300 rounded">{error}</div>}
             {ok && <div className="p-3 bg-green-100 border border-green-300 rounded">{ok}</div>}
@@ -97,8 +105,12 @@ export default function ConfigEditor() {
                 </div>
             </section>
 
-            <button type="submit" disabled={saving} className="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50">
-                {saving ? "Saving�" : "Save"}
+            <button
+                type="submit"
+                disabled={saving}
+                className="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50"
+            >
+                {saving ? "Saving…" : "Save"}
             </button>
         </form>
     );
