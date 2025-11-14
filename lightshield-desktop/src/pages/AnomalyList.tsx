@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import type { Anomaly } from "../types";
 
 export default function AnomalyList() {
@@ -6,45 +6,56 @@ export default function AnomalyList() {
     const [loading, setLoading] = useState(true);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
+    // Centralized fetch function
+    const fetchAnomalies = async () => {
+        setLoading(true);
+        try {
+            const res = await fetch("http://localhost:5213/api/anomalies");
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+
+            let list: Anomaly[] = [];
+            if (Array.isArray(data)) list = data;
+            else if (
+                typeof data === "object" &&
+                data !== null &&
+                "items" in data &&
+                Array.isArray((data as { items?: unknown }).items)
+            )
+                list = (data as { items: Anomaly[] }).items;
+
+            setAnomalies(list);
+            setLastUpdated(new Date());
+        } catch (err) {
+            console.error("Failed to load anomalies:", err);
+            setAnomalies([]);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Auto-refresh every 5s
     useEffect(() => {
-        const fetchAnomalies = async () => {
-            try {
-                const res = await fetch("http://localhost:5213/api/anomalies");
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-
-                let list: Anomaly[] = [];
-                if (Array.isArray(data)) {
-                    list = data as Anomaly[];
-                } else if (
-                    typeof data === "object" &&
-                    data !== null &&
-                    "items" in data &&
-                    Array.isArray((data as { items?: unknown }).items)
-                ) {
-                    list = (data as { items: Anomaly[] }).items;
-                }
-
-                setAnomalies(list);
-                setLastUpdated(new Date());
-            } catch (err) {
-                console.error("Failed to load anomalies:", err);
-                setAnomalies([]);
-            } finally {
-                setLoading(false);
-            }
-        };
-
         fetchAnomalies();
-        const interval = setInterval(fetchAnomalies, 5000); // refresh every 5s
+        const interval = setInterval(fetchAnomalies, 5000);
         return () => clearInterval(interval);
     }, []);
 
     return (
         <div>
-            <h2 className="text-xl font-semibold mb-2">Anomalies</h2>
+            <div className="flex justify-between items-center mb-2">
+                <h2 className="text-xl font-semibold">Anomalies</h2>
+                <button
+                    onClick={fetchAnomalies}
+                    disabled={loading}
+                    className="text-sm px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                >
+                    🔄 Refresh Now
+                </button>
+            </div>
+
             {loading ? (
-                <p>Loading anomalies�</p>
+                <p>Loading anomalies…</p>
             ) : anomalies.length === 0 ? (
                 <p>No anomalies found.</p>
             ) : (
