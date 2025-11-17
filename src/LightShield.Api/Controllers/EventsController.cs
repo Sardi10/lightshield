@@ -71,13 +71,86 @@ namespace LightShield.Api.Controllers
         }
 
         [HttpGet]
-        public async Task<IEnumerable<Event>> Get()
+        public async Task<IActionResult> Get(
+    [FromQuery] string? search,
+    [FromQuery] string? sortBy = "timestamp",
+    [FromQuery] string? sortDir = "desc",
+    [FromQuery] DateTime? startDate = null,
+    [FromQuery] DateTime? endDate = null,
+    [FromQuery] int page = 1,
+    [FromQuery] int pageSize = 20)
         {
-            return await _db.Events
-                .OrderByDescending(e => e.Timestamp)
-                .Take(50)
-                .ToListAsync();
+            var query = _db.Events.AsNoTracking().AsQueryable();
+
+            // -------------------------- DATE FILTERING
+            if (startDate.HasValue)
+                query = query.Where(e => e.Timestamp >= startDate.Value.ToUniversalTime());
+
+            if (endDate.HasValue)
+                query = query.Where(e => e.Timestamp <= endDate.Value.ToUniversalTime());
+
+            // -------------------------- SORTING
+            query = (sortBy?.ToLower(), sortDir?.ToLower()) switch
+            {
+                ("hostname", "asc") => query.OrderBy(e => e.Hostname),
+                ("hostname", "desc") => query.OrderByDescending(e => e.Hostname),
+
+                ("type", "asc") => query.OrderBy(e => e.Type),
+                ("type", "desc") => query.OrderByDescending(e => e.Type),
+
+                ("source", "asc") => query.OrderBy(e => e.Source),
+                ("source", "desc") => query.OrderByDescending(e => e.Source),
+
+                ("timestamp", "asc") => query.OrderBy(e => e.Timestamp),
+                _ => query.OrderByDescending(e => e.Timestamp)
+            };
+
+            // -------------------------- MATERIALIZE (small dataset)
+            var all = await query.ToListAsync();
+
+            // -------------------------- UNIVERSAL SEARCH
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var s = search.ToLower();
+
+                all = all
+                    .Where(e =>
+                        (e.Hostname ?? "").ToLower().Contains(s) ||
+                        (e.Type ?? "").ToLower().Contains(s) ||
+                        (e.Source ?? "").ToLower().Contains(s) ||
+                        (e.PathOrMessage ?? "").ToLower().Contains(s) ||
+                        e.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")
+                            .ToLower().Contains(s)
+                    )
+                    .ToList();
+            }
+
+            // -------------------------- PAGINATION
+            var totalCount = all.Count;
+
+            var items = all
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(e => new
+                {
+                    id = e.Id,
+                    timestamp = e.Timestamp,
+                    hostname = e.Hostname,
+                    type = e.Type,
+                    source = e.Source,
+                    message = e.PathOrMessage
+                })
+                .ToList();
+
+            return Ok(new
+            {
+                totalCount,
+                page,
+                pageSize,
+                items
+            });
         }
+
 
         private async Task CheckImmediateThresholdsAsync(
     Event evt,
@@ -119,7 +192,7 @@ namespace LightShield.Api.Controllers
                          && e.Timestamp >= since)
                 .CountAsync(ct);
 
-            // ✅ thresholds from ConfigurationService
+            //  thresholds from ConfigurationService
             var modifyThreshold = await _configService.GetFileEditThresholdAsync();
             var deleteThreshold = await _configService.GetFileDeleteThresholdAsync();
             var createThreshold = await _configService.GetFileCreateThresholdAsync();
@@ -210,7 +283,7 @@ namespace LightShield.Api.Controllers
                 // Send alert via configured services (SMS/Email)
                 await _alertService.SendAlertAsync(alertMsg);
 
-                // ✅ Persist alert into database
+                //  Persist alert into database
                 _db.Alerts.Add(new Alert
                 {
                     Timestamp = DateTime.UtcNow,
