@@ -35,7 +35,7 @@ export default function Dashboard() {
                     <h1 className="text-3xl font-extrabold tracking-wide drop-shadow-sm">
                         LightShield Dashboard
                     </h1>
-                    <div className="space-x-6 text-sm font-medium">
+                    <div className="space-x-6 text-base  font-medium">
                         <Link
                             to="/"
                             className="text-white/90 hover:text-white transition"
