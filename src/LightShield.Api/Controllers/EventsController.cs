@@ -42,7 +42,7 @@ namespace LightShield.Api.Controllers
         public async Task<IActionResult> Post([FromBody] Event evt)
         {
             // 1) Normalize & overwrite timestamp + type
-            evt.Timestamp = DateTime.UtcNow;
+            evt.Timestamp = DateTime.Now;   // local machine time
             var rawType = evt.Type ?? "";
             var normalizedType = rawType.Trim().ToLowerInvariant();
             evt.Type = normalizedType;
@@ -67,18 +67,21 @@ namespace LightShield.Api.Controllers
                 evt, normalizedType, HttpContext.RequestAborted
             );
 
+            // Run anomaly + alert detection
+            await DetectLoginFailureAnomalies(evt);
+
             return Accepted();
         }
 
         [HttpGet]
         public async Task<IActionResult> Get(
-    [FromQuery] string? search,
-    [FromQuery] string? sortBy = "timestamp",
-    [FromQuery] string? sortDir = "desc",
-    [FromQuery] DateTime? startDate = null,
-    [FromQuery] DateTime? endDate = null,
-    [FromQuery] int page = 1,
-    [FromQuery] int pageSize = 20)
+            [FromQuery] string? search,
+            [FromQuery] string? sortBy = "timestamp",
+            [FromQuery] string? sortDir = "desc",
+            [FromQuery] DateTime? startDate = null,
+            [FromQuery] DateTime? endDate = null,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20)
         {
             var query = _db.Events.AsNoTracking().AsQueryable();
 
@@ -153,9 +156,9 @@ namespace LightShield.Api.Controllers
 
 
         private async Task CheckImmediateThresholdsAsync(
-    Event evt,
-    string type,
-    CancellationToken ct)
+            Event evt,
+            string type,
+            CancellationToken ct)
         {
             if (type is not "failedlogin"
                      and not "filecreate"
@@ -237,11 +240,11 @@ namespace LightShield.Api.Controllers
 
 
         private async Task InsertIfNotDuplicateAsync(
-    string hostname,
-    string anomalyType,
-    string description,
-    DateTime detectedAt,
-    CancellationToken ct)
+            string hostname,
+            string anomalyType,
+            string description,
+            DateTime detectedAt,
+            CancellationToken ct)
         {
             // Prevent duplicate anomalies within the last minute
             var exists = await _db.Anomalies
@@ -286,7 +289,7 @@ namespace LightShield.Api.Controllers
                 //  Persist alert into database
                 _db.Alerts.Add(new Alert
                 {
-                    Timestamp = DateTime.UtcNow,
+                    Timestamp = DateTime.Now,
                     Type = anomaly.Type,
                     Message = alertMsg,
                     Channel = "SMS/Email" // later: split if you want separate records
@@ -304,6 +307,64 @@ namespace LightShield.Api.Controllers
                 );
             }
         }
+
+
+        private async Task DetectLoginFailureAnomalies(Event evt)
+        {
+            // Normalize again just to be safe
+            var type = evt.Type?.Trim().ToLowerInvariant();
+
+            if (type != "loginfailure")
+                return;
+
+            // 1. Simple anomaly
+            var simpleAnomaly = new Anomaly
+            {
+                Timestamp = evt.Timestamp,
+                Type = "LoginFailure",
+                Description = $"Login failed on {evt.Hostname}. Message: {evt.PathOrMessage}",
+                Hostname = evt.Hostname
+            };
+
+            _db.Anomalies.Add(simpleAnomaly);
+
+
+            // 2. Burst detection
+            var now = evt.Timestamp;
+            var windowStart = now.AddSeconds(-30);
+            int threshold = 5;
+
+            var recentFailures = await _db.Events
+                .Where(e => e.Type == "loginfailure" &&
+                            e.Timestamp >= windowStart &&
+                            e.Timestamp <= now)
+                .CountAsync();
+
+            if (recentFailures >= threshold)
+            {
+                var burst = new Anomaly
+                {
+                    Timestamp = now,
+                    Type = "LoginFailureBurst",
+                    Description = $"{recentFailures} failed logins in last 30 seconds.",
+                    Hostname = evt.Hostname
+                };
+                _db.Anomalies.Add(burst);
+
+                var alert = new Alert
+                {
+                    Timestamp = now,
+                    Type = "LoginFailureBurst",
+                    Message = $"{recentFailures} login failures within 30 seconds on host {evt.Hostname}.",
+                    Channel = "system"
+                };
+                _db.Alerts.Add(alert);
+            }
+
+            await _db.SaveChangesAsync();
+        }
+
+
 
     }
 }
