@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using LightShield.Api.Data;
 using LightShield.Api.Models;
+using LightShield.Api.Services.Alerts;
 
 namespace LightShield.Api.Controllers
 {
@@ -17,12 +18,68 @@ namespace LightShield.Api.Controllers
         }
 
         [HttpGet]
-        public async Task<IEnumerable<Alert>> Get()
+        public async Task<IActionResult> Get(
+            string? search,
+            DateTime? startDate,
+            DateTime? endDate,
+            int page = 1,
+            int pageSize = 10,
+            string sortBy = "timestamp",
+            string sortDir = "desc")
         {
-            return await _db.Alerts
-                .OrderByDescending(a => a.Timestamp)
-                .Take(50)
+            var query = _db.Alerts.AsQueryable();
+
+            // ---------------- SEARCH (all fields)
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                search = search.ToLower();
+                query = query.Where(a =>
+                    a.Type.ToLower().Contains(search) ||
+                    a.Message.ToLower().Contains(search) ||
+                    a.Channel.ToLower().Contains(search)
+                );
+            }
+
+            // ---------------- DATE FILTERS
+            if (startDate.HasValue)
+                query = query.Where(a => a.Timestamp >= startDate.Value);
+
+            if (endDate.HasValue)
+                query = query.Where(a => a.Timestamp <= endDate.Value);
+
+            // ---------------- SORTING
+            query = (sortBy.ToLower(), sortDir.ToLower()) switch
+            {
+                ("type", "asc") => query.OrderBy(a => a.Type),
+                ("type", "desc") => query.OrderByDescending(a => a.Type),
+
+                ("channel", "asc") => query.OrderBy(a => a.Channel),
+                ("channel", "desc") => query.OrderByDescending(a => a.Channel),
+
+                ("timestamp", "asc") => query.OrderBy(a => a.Timestamp),
+                _ => query.OrderByDescending(a => a.Timestamp)
+            };
+
+            // ---------------- PAGINATION
+            var totalCount = await query.CountAsync();
+            var items = await query
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
                 .ToListAsync();
+
+            return Ok(new
+            {
+                items,
+                totalCount
+            });
         }
+
+        [HttpGet("test-email")]
+        public async Task<IActionResult> TestEmail([FromServices] IAlertService alertService)
+        {
+            await alertService.SendAlertAsync("This is a LightShield test alert email.");
+            return Ok("Test email sent successfully.");
+        }
+
     }
 }

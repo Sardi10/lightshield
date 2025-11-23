@@ -15,11 +15,13 @@ export default function AnomalyList() {
     const [totalCount, setTotalCount] = useState(0);
     const totalPages = Math.ceil(totalCount / pageSize);
 
-    // Loading + Last Updated
+    // UI state
     const [loading, setLoading] = useState(false);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
+    // --------------------------------------------------------------------
     // Fetch anomalies
+    // --------------------------------------------------------------------
     const fetchAnomalies = async () => {
         setLoading(true);
 
@@ -27,7 +29,7 @@ export default function AnomalyList() {
             page: page.toString(),
             pageSize: pageSize.toString(),
             sortBy,
-            sortDir: "desc" // always newest first
+            sortDir: "desc",
         });
 
         if (search) params.append("search", search);
@@ -40,6 +42,15 @@ export default function AnomalyList() {
             );
             const data = await res.json();
 
+            // Update pagination safely
+            const newTotalPages = Math.ceil(data.totalCount / pageSize);
+            if (page > newTotalPages && newTotalPages > 0) {
+                setPage(newTotalPages);
+                setLoading(false);
+                setLastUpdated(new Date());
+                return;
+            }
+
             setAnomalies(data.items);
             setTotalCount(data.totalCount);
         } catch (err) {
@@ -50,20 +61,47 @@ export default function AnomalyList() {
         }
     };
 
-    // Re-fetch when inputs change
+    // Re-fetch when table controls change
     useEffect(() => {
         fetchAnomalies();
     }, [page, search, startDate, endDate, sortBy]);
 
+    // Auto-refresh every 5 seconds (using SAME dependencies as EventStream)
     useEffect(() => {
-        fetchAnomalies();
         const interval = setInterval(fetchAnomalies, 5000);
         return () => clearInterval(interval);
-    }, [search, startDate, endDate, sortBy, page]);
+    }, [page, search, startDate, endDate, sortBy]);
 
+    // --------------------------------------------------------------------
+    // Badge styling
+    // --------------------------------------------------------------------
+    const getTypeBadge = (type: string) => {
+        const t = type.toLowerCase();
 
+        if (t.includes("burst"))
+            return (
+                <span className="px-2 py-1 rounded text-xs font-bold bg-red-600 text-white">
+                    🔥 {type}
+                </span>
+            );
 
+        if (t.includes("login"))
+            return (
+                <span className="px-2 py-1 rounded text-xs font-bold bg-orange-500 text-white">
+                    ⚠ {type}
+                </span>
+            );
+
+        return (
+            <span className="px-2 py-1 rounded text-xs font-bold bg-blue-600 text-white">
+                {type}
+            </span>
+        );
+    };
+
+    // --------------------------------------------------------------------
     // Pagination numbers with ellipses
+    // --------------------------------------------------------------------
     const getPageNumbers = () => {
         const pages = [];
 
@@ -74,21 +112,25 @@ export default function AnomalyList() {
 
         pages.push(1);
         if (page > 3) pages.push("...");
+
         for (let i = page - 1; i <= page + 1; i++) {
             if (i > 1 && i < totalPages) pages.push(i);
         }
+
         if (page < totalPages - 2) pages.push("...");
         pages.push(totalPages);
 
         return pages;
     };
 
+    // --------------------------------------------------------------------
+    // UI
+    // --------------------------------------------------------------------
     return (
         <div>
-
             {/* ---------------- TITLE + REFRESH BUTTON ---------------- */}
             <div className="flex justify-between items-center mb-2">
-                <h2 className="text-xl font-semibold">Anomaly Log</h2>
+                <h2 className="text-xl font-semibold text-gray-800">Anomaly Log</h2>
 
                 <button
                     onClick={fetchAnomalies}
@@ -164,8 +206,6 @@ export default function AnomalyList() {
                 </div>
             </div>
 
-           
-
             {/* ---------------- TABLE ---------------- */}
             <div className="overflow-x-auto">
                 <table className="min-w-full bg-white rounded-lg shadow-md">
@@ -179,10 +219,12 @@ export default function AnomalyList() {
                     </thead>
                     <tbody>
                         {anomalies.map((a) => (
-                            <tr key={a.id} className="border-b hover:bg-blue-50">
-                                <td className="px-4 py-2">{new Date(a.timestamp).toLocaleString()}</td>
+                            <tr key={a.id} className="border-b hover:bg-blue-50 transition">
+                                <td className="px-4 py-2">
+                                    {new Date(a.timestamp).toLocaleString()}
+                                </td>
                                 <td className="px-4 py-2">{a.hostname}</td>
-                                <td className="px-4 py-2 font-semibold text-blue-700">{a.type}</td>
+                                <td className="px-4 py-2">{getTypeBadge(a.type)}</td>
                                 <td className="px-4 py-2">{a.description}</td>
                             </tr>
                         ))}
@@ -199,11 +241,12 @@ export default function AnomalyList() {
 
             {/* ---------------- PAGINATION ---------------- */}
             <div className="flex justify-center mt-6 space-x-2">
-
                 <button
                     disabled={page === 1}
                     onClick={() => setPage(page - 1)}
-                    className={`px-4 py-2 rounded-lg ${page === 1 ? "bg-gray-300 cursor-not-allowed" : "bg-blue-600 text-white hover:bg-blue-700"
+                    className={`px-4 py-2 rounded-lg ${page === 1
+                            ? "bg-gray-300 cursor-not-allowed"
+                            : "bg-blue-600 text-white hover:bg-blue-700"
                         }`}
                 >
                     Prev
@@ -214,7 +257,9 @@ export default function AnomalyList() {
                         key={i}
                         disabled={p === "..."}
                         onClick={() => typeof p === "number" && setPage(p)}
-                        className={`px-3 py-2 rounded-lg ${page === p ? "bg-blue-600 text-white" : "bg-gray-200 hover:bg-gray-300"
+                        className={`px-3 py-2 rounded-lg ${page === p
+                                ? "bg-blue-600 text-white"
+                                : "bg-gray-200 hover:bg-gray-300"
                             }`}
                     >
                         {p}
@@ -224,12 +269,13 @@ export default function AnomalyList() {
                 <button
                     disabled={page === totalPages}
                     onClick={() => setPage(page + 1)}
-                    className={`px-4 py-2 rounded-lg ${page === totalPages ? "bg-gray-300 cursor-not-allowed" : "bg-blue-600 text-white hover:bg-blue-700"
+                    className={`px-4 py-2 rounded-lg ${page === totalPages
+                            ? "bg-gray-300 cursor-not-allowed"
+                            : "bg-blue-600 text-white hover:bg-blue-700"
                         }`}
                 >
                     Next
                 </button>
-
             </div>
         </div>
     );
