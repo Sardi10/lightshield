@@ -21,13 +21,13 @@ namespace LightShield.Api.Controllers
 
         [HttpGet]
         public async Task<IActionResult> Get(
-    [FromQuery] string? search,
-    [FromQuery] string? sortBy = "timestamp",
-    [FromQuery] string? sortDir = "desc",
-    [FromQuery] DateTime? startDate = null,
-    [FromQuery] DateTime? endDate = null,
-    [FromQuery] int page = 1,
-    [FromQuery] int pageSize = 5)
+        [FromQuery] string? search,
+        [FromQuery] string? sortBy = "timestamp",
+        [FromQuery] string? sortDir = "desc",
+        [FromQuery] DateTime? startDate = null,
+        [FromQuery] DateTime? endDate = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 5)
         {
             if (page < 1) page = 1;
             if (pageSize < 1 || pageSize > 500) pageSize = 5;
