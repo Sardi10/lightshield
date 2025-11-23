@@ -1,9 +1,4 @@
-﻿// src/LightShield.Api/Controllers/EventsController.cs
-
-// src/LightShield.Api/Controllers/EventsController.cs
-
-using System;
-using System.Collections.Generic;
+﻿using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,6 +9,8 @@ using LightShield.Api.Data;
 using LightShield.Api.Models;
 using LightShield.Api.Services.Alerts;
 using LightShield.Api.Services;
+using Newtonsoft.Json;
+using System.Net.Http;
 
 namespace LightShield.Api.Controllers
 {
@@ -25,6 +22,7 @@ namespace LightShield.Api.Controllers
         private readonly IAlertService _alertService;
         private readonly ILogger<EventsController> _logger;
         private readonly ConfigurationService _configService;
+        private static readonly HttpClient _http = new HttpClient();
 
         public EventsController(
             EventsDbContext db,
@@ -35,44 +33,57 @@ namespace LightShield.Api.Controllers
             _db = db;
             _alertService = alertService;
             _logger = logger;
-            _configService = configService; 
+            _configService = configService;
         }
 
+        // ======================================================================
+        // POST /api/events
+        // ======================================================================
         [HttpPost]
         public async Task<IActionResult> Post([FromBody] Event evt)
         {
-            // 1) Normalize & overwrite timestamp + type
-            evt.Timestamp = DateTime.Now;   // local machine time
-            var rawType = evt.Type ?? "";
-            var normalizedType = rawType.Trim().ToLowerInvariant();
-            evt.Type = normalizedType;
+            // -----------------------------------------------------------
+            // Normalize + enforce local timestamp
+            // -----------------------------------------------------------
+            evt.Timestamp = DateTime.Now;
+            evt.Type = (evt.Type ?? "").Trim().ToLowerInvariant();
+            evt.OperatingSystem = evt.OperatingSystem?.ToLower() ?? "unknown";
 
-            // 2) Persist
+            // -----------------------------------------------------------
+            // Assign severity (Info, Warning, Critical)
+            // -----------------------------------------------------------
+            evt.Severity = ClassifySeverity(evt);
+
+            // -----------------------------------------------------------
+            // Try GeoIP Enrichment (offline safe)
+            // -----------------------------------------------------------
+            await TryGeoEnrich(evt);
+
+            // -----------------------------------------------------------
+            // Save event to DB
+            // -----------------------------------------------------------
             _db.Events.Add(evt);
-            await _db.SaveChangesAsync(HttpContext.RequestAborted);
+            await _db.SaveChangesAsync();
 
-            _logger.LogDebug(
-                "Received event.Type = \"{Raw}\" → stored as \"{Norm}\"",
-                rawType, normalizedType
-            );
-
-            // 3) Log the saved event’s details
             _logger.LogInformation(
-                "[{Timestamp:O}] {Source}:{Type} → {PathOrMessage} @ {Hostname}",
-                evt.Timestamp, evt.Source, normalizedType, evt.PathOrMessage, evt.Hostname
+                "[{ts:O}] {source}:{type} {msg} @ {host}",
+                evt.Timestamp, evt.Source, evt.Type, evt.PathOrMessage, evt.Hostname
             );
 
-            // 4) Run immediate-trigger logic
             await CheckImmediateThresholdsAsync(
-                evt, normalizedType, HttpContext.RequestAborted
-            );
+                evt, evt.Type, HttpContext.RequestAborted);
 
-            // Run anomaly + alert detection
+            // -----------------------------------------------------------
+            // IDS login-failure anomaly detection (simple + burst)
+            // -----------------------------------------------------------
             await DetectLoginFailureAnomalies(evt);
 
             return Accepted();
         }
 
+        // ======================================================================
+        // GET /api/events
+        // ======================================================================
         [HttpGet]
         public async Task<IActionResult> Get(
             [FromQuery] string? search,
@@ -85,14 +96,18 @@ namespace LightShield.Api.Controllers
         {
             var query = _db.Events.AsNoTracking().AsQueryable();
 
-            // -------------------------- DATE FILTERING
+            // -----------------------------------------------------------
+            // Date filters
+            // -----------------------------------------------------------
             if (startDate.HasValue)
-                query = query.Where(e => e.Timestamp >= startDate.Value.ToUniversalTime());
+                query = query.Where(e => e.Timestamp >= startDate.Value);
 
             if (endDate.HasValue)
-                query = query.Where(e => e.Timestamp <= endDate.Value.ToUniversalTime());
+                query = query.Where(e => e.Timestamp <= endDate.Value);
 
-            // -------------------------- SORTING
+            // -----------------------------------------------------------
+            // Sorting
+            // -----------------------------------------------------------
             query = (sortBy?.ToLower(), sortDir?.ToLower()) switch
             {
                 ("hostname", "asc") => query.OrderBy(e => e.Hostname),
@@ -101,6 +116,9 @@ namespace LightShield.Api.Controllers
                 ("type", "asc") => query.OrderBy(e => e.Type),
                 ("type", "desc") => query.OrderByDescending(e => e.Type),
 
+                ("severity", "asc") => query.OrderBy(e => e.Severity),
+                ("severity", "desc") => query.OrderByDescending(e => e.Severity),
+
                 ("source", "asc") => query.OrderBy(e => e.Source),
                 ("source", "desc") => query.OrderByDescending(e => e.Source),
 
@@ -108,27 +126,31 @@ namespace LightShield.Api.Controllers
                 _ => query.OrderByDescending(e => e.Timestamp)
             };
 
-            // -------------------------- MATERIALIZE (small dataset)
             var all = await query.ToListAsync();
 
-            // -------------------------- UNIVERSAL SEARCH
+            // -----------------------------------------------------------
+            // Universal Search
+            // -----------------------------------------------------------
             if (!string.IsNullOrWhiteSpace(search))
             {
-                var s = search.ToLower();
-
+                string s = search.ToLower();
                 all = all
                     .Where(e =>
                         (e.Hostname ?? "").ToLower().Contains(s) ||
                         (e.Type ?? "").ToLower().Contains(s) ||
                         (e.Source ?? "").ToLower().Contains(s) ||
                         (e.PathOrMessage ?? "").ToLower().Contains(s) ||
+                        (e.Username ?? "").ToLower().Contains(s) ||
+                        (e.IPAddress ?? "").ToLower().Contains(s) ||
                         e.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")
                             .ToLower().Contains(s)
                     )
                     .ToList();
             }
 
-            // -------------------------- PAGINATION
+            // -----------------------------------------------------------
+            // Pagination
+            // -----------------------------------------------------------
             var totalCount = all.Count;
 
             var items = all
@@ -136,29 +158,73 @@ namespace LightShield.Api.Controllers
                 .Take(pageSize)
                 .Select(e => new
                 {
-                    id = e.Id,
-                    timestamp = e.Timestamp,
-                    hostname = e.Hostname,
-                    type = e.Type,
-                    source = e.Source,
-                    message = e.PathOrMessage
+                    e.Id,
+                    e.Timestamp,
+                    e.Hostname,
+                    e.Type,
+                    e.Source,
+                    Message = e.PathOrMessage,
+                    e.Severity,
+                    e.Username,
+                    e.IPAddress,
+                    e.Country,
+                    e.City,
+                    e.OperatingSystem
                 })
                 .ToList();
 
-            return Ok(new
-            {
-                totalCount,
-                page,
-                pageSize,
-                items
-            });
+            return Ok(new { totalCount, page, pageSize, items });
         }
 
+        // ======================================================================
+        // SEVERITY CLASSIFICATION
+        // ======================================================================
+        private static string ClassifySeverity(Event evt)
+        {
+            if (evt.Type.Contains("loginfailureburst"))
+                return "Critical";
 
+            if (evt.Type.Contains("loginfailure"))
+                return "Warning";
+
+            if (evt.Type.Contains("unauthorized"))
+                return "Critical";
+
+            return "Info";
+        }
+
+        // ======================================================================
+        // OFFLINE-SAFE GEO ENRICHMENT
+        // ======================================================================
+        private async Task TryGeoEnrich(Event evt)
+        {
+            if (string.IsNullOrWhiteSpace(evt.IPAddress))
+                return;
+
+            try
+            {
+                // Free, no-key lookup (we replace with MaxMind later)
+                string url = $"http://ip-api.com/json/{evt.IPAddress}";
+                string json = await _http.GetStringAsync(url);
+                dynamic data = JsonConvert.DeserializeObject(json)!;
+
+                if (data.status == "success")
+                {
+                    evt.Country = data.country;
+                    evt.City = data.city;
+                }
+            }
+            catch
+            {
+                // No internet? VPN? Firewalled? Quietly ignore.
+            }
+        }
+
+        // ======================================================================
+        // EXISTING IMMEDIATE THRESHOLD LOGIC 
+        // ======================================================================
         private async Task CheckImmediateThresholdsAsync(
-            Event evt,
-            string type,
-            CancellationToken ct)
+            Event evt, string type, CancellationToken ct)
         {
             if (type is not "failedlogin"
                      and not "filecreate"
@@ -195,7 +261,6 @@ namespace LightShield.Api.Controllers
                          && e.Timestamp >= since)
                 .CountAsync(ct);
 
-            //  thresholds from ConfigurationService
             var modifyThreshold = await _configService.GetFileEditThresholdAsync();
             var deleteThreshold = await _configService.GetFileDeleteThresholdAsync();
             var createThreshold = await _configService.GetFileCreateThresholdAsync();
@@ -203,42 +268,32 @@ namespace LightShield.Api.Controllers
 
             if (fileModifyCount >= modifyThreshold)
                 await InsertIfNotDuplicateAsync(
-                    evt.Hostname,
-                    "SevereFileModifyBurst",
+                    evt.Hostname, "SevereFileModifyBurst",
                     $"{fileModifyCount} file modifications in last 5 minutes (≥{modifyThreshold})",
-                    evt.Timestamp,
-                    ct
-                );
+                    evt.Timestamp, ct);
 
             if (fileDeleteCount >= deleteThreshold)
                 await InsertIfNotDuplicateAsync(
-                    evt.Hostname,
-                    "SevereFileDeleteBurst",
+                    evt.Hostname, "SevereFileDeleteBurst",
                     $"{fileDeleteCount} file deletions in last 5 minutes (≥{deleteThreshold})",
-                    evt.Timestamp,
-                    ct
-                );
+                    evt.Timestamp, ct);
 
             if (fileCreateCount >= createThreshold)
                 await InsertIfNotDuplicateAsync(
-                    evt.Hostname,
-                    "SevereFileCreateBurst",
+                    evt.Hostname, "SevereFileCreateBurst",
                     $"{fileCreateCount} file creations in last 5 minutes (≥{createThreshold})",
-                    evt.Timestamp,
-                    ct
-                );
+                    evt.Timestamp, ct);
 
             if (failedLoginCount >= loginThreshold)
                 await InsertIfNotDuplicateAsync(
-                    evt.Hostname,
-                    "SevereFailedLoginBurst",
+                    evt.Hostname, "SevereFailedLoginBurst",
                     $"{failedLoginCount} failed logins in last 5 minutes (≥{loginThreshold})",
-                    evt.Timestamp,
-                    ct
-                );
+                    evt.Timestamp, ct);
         }
 
-
+        // ======================================================================
+        // BURST LOGIC 
+        // ======================================================================
         private async Task InsertIfNotDuplicateAsync(
             string hostname,
             string anomalyType,
@@ -246,7 +301,7 @@ namespace LightShield.Api.Controllers
             DateTime detectedAt,
             CancellationToken ct)
         {
-            // Prevent duplicate anomalies within the last minute
+            
             var exists = await _db.Anomalies
                 .Where(a => a.Type == anomalyType
                          && a.Hostname == hostname
@@ -262,7 +317,6 @@ namespace LightShield.Api.Controllers
                 return;
             }
 
-            // Create and persist anomaly record
             var anomaly = new Anomaly
             {
                 Type = anomalyType,
@@ -274,79 +328,65 @@ namespace LightShield.Api.Controllers
             _db.Anomalies.Add(anomaly);
             await _db.SaveChangesAsync(ct);
 
-            _logger.LogWarning(
-                "Anomaly detected: {Desc} on {Host}",
-                anomaly.Description, anomaly.Hostname
-            );
-
-            // Build alert message
             var alertMsg = $"[LightShield] {anomaly.Type} on {anomaly.Hostname} @ {anomaly.Timestamp:O}";
             try
             {
-                // Send alert via configured services (SMS/Email)
                 await _alertService.SendAlertAsync(alertMsg);
 
-                //  Persist alert into database
                 _db.Alerts.Add(new Alert
                 {
                     Timestamp = DateTime.Now,
                     Type = anomaly.Type,
                     Message = alertMsg,
-                    Channel = "SMS/Email" // later: split if you want separate records
+                    Channel = "SMS/Email"
                 });
                 await _db.SaveChangesAsync(ct);
-
-                _logger.LogInformation("Alert sent and logged: {Msg}", alertMsg);
             }
             catch (Exception ex)
             {
-                _logger.LogError(
-                    ex,
+                _logger.LogError(ex,
                     "Failed sending alert for {Type} on {Host}",
-                    anomaly.Type, anomaly.Hostname
-                );
+                    anomalyType, hostname);
             }
         }
 
-
+        // ======================================================================
+        // LOGIN FAILURE ANOMALIES
+        // ======================================================================
         private async Task DetectLoginFailureAnomalies(Event evt)
         {
-            // Normalize again just to be safe
-            var type = evt.Type?.Trim().ToLowerInvariant();
-
+            var type = evt.Type?.ToLowerInvariant();
             if (type != "loginfailure")
                 return;
 
-            // 1. Simple anomaly
-            var simpleAnomaly = new Anomaly
+            // simple anomaly
+            var simple = new Anomaly
             {
                 Timestamp = evt.Timestamp,
                 Type = "LoginFailure",
-                Description = $"Login failed on {evt.Hostname}. Message: {evt.PathOrMessage}",
+                Description = $"Login failed on {evt.Hostname}.",
                 Hostname = evt.Hostname
             };
 
-            _db.Anomalies.Add(simpleAnomaly);
+            _db.Anomalies.Add(simple);
 
-
-            // 2. Burst detection
+            // burst (within 30 seconds)
             var now = evt.Timestamp;
             var windowStart = now.AddSeconds(-30);
-            int threshold = 5;
 
-            var recentFailures = await _db.Events
-                .Where(e => e.Type == "loginfailure" &&
-                            e.Timestamp >= windowStart &&
-                            e.Timestamp <= now)
+            int failures = await _db.Events
+                .Where(e => e.Type == "loginfailure"
+                         && e.Timestamp >= windowStart
+                         && e.Timestamp <= now)
                 .CountAsync();
 
-            if (recentFailures >= threshold)
+            if (failures >= 5)
             {
                 var burst = new Anomaly
                 {
                     Timestamp = now,
                     Type = "LoginFailureBurst",
-                    Description = $"{recentFailures} failed logins in last 30 seconds.",
+                    Description = $"{failures} failed logins in last 30 seconds.",
                     Hostname = evt.Hostname
                 };
                 _db.Anomalies.Add(burst);
@@ -355,17 +395,14 @@ namespace LightShield.Api.Controllers
                 {
                     Timestamp = now,
                     Type = "LoginFailureBurst",
-                    Message = $"{recentFailures} login failures within 30 seconds on host {evt.Hostname}.",
+                    Message = $"{failures} login failures within 30 seconds on host {evt.Hostname}.",
                     Channel = "system"
                 };
+
                 _db.Alerts.Add(alert);
             }
 
             await _db.SaveChangesAsync();
         }
-
-
-
     }
 }
-

@@ -19,7 +19,9 @@ export default function EventStream() {
     const [loading, setLoading] = useState(false);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
+    // ======================================================================
     // Fetch events
+    // ======================================================================
     const fetchEvents = async () => {
         setLoading(true);
 
@@ -38,8 +40,17 @@ export default function EventStream() {
             const res = await fetch(
                 `http://localhost:5213/api/events?${params.toString()}`
             );
-
             const data = await res.json();
+
+            const newTotalPages = Math.ceil(data.totalCount / pageSize);
+
+            // Prevent pagination reset
+            if (page > newTotalPages && newTotalPages > 0) {
+                setPage(newTotalPages);
+                setLoading(false);
+                setLastUpdated(new Date());
+                return;
+            }
 
             setEvents(data.items);
             setTotalCount(data.totalCount);
@@ -51,19 +62,76 @@ export default function EventStream() {
         }
     };
 
-    // When filters change
+    // Fetch when filters change
     useEffect(() => {
         fetchEvents();
     }, [page, search, startDate, endDate, sortBy]);
 
-    // Auto-refresh every 5 seconds
+    // Auto-refresh every 5 seconds (pagination-safe)
     useEffect(() => {
-        fetchEvents();
         const interval = setInterval(fetchEvents, 5000);
         return () => clearInterval(interval);
     }, [page, search, startDate, endDate, sortBy]);
 
-    // Pagination numbers with ellipses
+    // ======================================================================
+    // Helper — severity badge
+    // ======================================================================
+    const badge = (sev: string) => {
+        if (!sev) return null;
+
+        const s = sev.toLowerCase();
+
+        if (s === "critical")
+            return (
+                <span className="px-2 py-1 bg-red-600 text-white text-xs font-bold rounded">
+                    🔥 Critical
+                </span>
+            );
+
+        if (s === "warning")
+            return (
+                <span className="px-2 py-1 bg-orange-500 text-white text-xs font-bold rounded">
+                    ⚠ Warning
+                </span>
+            );
+
+        return (
+            <span className="px-2 py-1 bg-blue-600 text-white text-xs font-bold rounded">
+                Info
+            </span>
+        );
+    };
+
+    // ======================================================================
+    // OS badge
+    // ======================================================================
+    const osBadge = (os: string) => {
+        const o = (os || "").toLowerCase();
+
+        if (o === "windows")
+            return (
+                <span className="px-2 py-1 bg-blue-700 text-white text-xs rounded">
+                    🪟 Windows
+                </span>
+            );
+
+        if (o === "linux")
+            return (
+                <span className="px-2 py-1 bg-yellow-600 text-white text-xs rounded">
+                    🐧 Linux
+                </span>
+            );
+
+        return (
+            <span className="px-2 py-1 bg-gray-500 text-white text-xs rounded">
+                Unknown
+            </span>
+        );
+    };
+
+    // ======================================================================
+    // Pagination numbers
+    // ======================================================================
     const getPageNumbers = () => {
         const pages = [];
 
@@ -85,8 +153,12 @@ export default function EventStream() {
         return pages;
     };
 
+    // ======================================================================
+    // UI
+    // ======================================================================
     return (
         <div>
+
             {/* ---------------- FILTER BAR ---------------- */}
             <div className="flex flex-wrap items-end gap-4 mb-6 bg-gray-100 p-4 rounded-lg shadow-inner">
 
@@ -149,12 +221,16 @@ export default function EventStream() {
                         <option value="type">Type</option>
                         <option value="source">Source</option>
                         <option value="message">Message</option>
+                        <option value="severity">Severity</option>
+                        <option value="username">Username</option>
+                        <option value="ipaddress">IP</option>
+                        <option value="operatingsystem">OS</option>
                     </select>
                 </div>
             </div>
 
             {/* ---------------- TITLE + REFRESH BUTTON ---------------- */}
-            <div className="flex justify-between items-center mb-2">
+            <div className="flex justify-between items-center mb-3">
                 <h2 className="text-xl font-semibold">Live Event Stream</h2>
 
                 <button
@@ -175,20 +251,36 @@ export default function EventStream() {
                             <th className="px-4 py-2 text-left">Timestamp</th>
                             <th className="px-4 py-2 text-left">Hostname</th>
                             <th className="px-4 py-2 text-left">Type</th>
-                            <th className="px-4 py-2 text-left">Source</th>
+                            <th className="px-4 py-2 text-left">Severity</th>
+                            <th className="px-4 py-2 text-left">OS</th>
+                            <th className="px-4 py-2 text-left">User</th>
+                            <th className="px-4 py-2 text-left">IP</th>
+                            <th className="px-4 py-2 text-left">Location</th>
                             <th className="px-4 py-2 text-left">Message</th>
                         </tr>
                     </thead>
 
                     <tbody>
                         {events.map((e) => (
-                            <tr key={e.id} className="border-b hover:bg-blue-50">
+                            <tr key={e.id} className="border-b hover:bg-blue-50 transition">
                                 <td className="px-4 py-2">
                                     {new Date(e.timestamp).toLocaleString()}
                                 </td>
                                 <td className="px-4 py-2">{e.hostname}</td>
                                 <td className="px-4 py-2">{e.type}</td>
-                                <td className="px-4 py-2">{e.source}</td>
+
+                                <td className="px-4 py-2">{badge(e.severity)}</td>
+
+                                <td className="px-4 py-2">{osBadge(e.operatingSystem)}</td>
+
+                                <td className="px-4 py-2">{e.username || "-"}</td>
+
+                                <td className="px-4 py-2">{e.ipAddress || "-"}</td>
+
+                                <td className="px-4 py-2">
+                                    {e.country ? `${e.city}, ${e.country}` : "-"}
+                                </td>
+
                                 <td className="px-4 py-2">{e.message}</td>
                             </tr>
                         ))}
@@ -208,7 +300,9 @@ export default function EventStream() {
                 <button
                     disabled={page === 1}
                     onClick={() => setPage(page - 1)}
-                    className={`px-4 py-2 rounded-lg ${page === 1 ? "bg-gray-300 cursor-not-allowed" : "bg-blue-600 text-white hover:bg-blue-700"
+                    className={`px-4 py-2 rounded-lg ${page === 1
+                            ? "bg-gray-300 cursor-not-allowed"
+                            : "bg-blue-600 text-white hover:bg-blue-700"
                         }`}
                 >
                     Prev
@@ -219,7 +313,9 @@ export default function EventStream() {
                         key={i}
                         disabled={p === "..."}
                         onClick={() => typeof p === "number" && setPage(p)}
-                        className={`px-3 py-2 rounded-lg ${page === p ? "bg-blue-600 text-white" : "bg-gray-200 hover:bg-gray-300"
+                        className={`px-3 py-2 rounded-lg ${page === p
+                                ? "bg-blue-600 text-white"
+                                : "bg-gray-200 hover:bg-gray-300"
                             }`}
                     >
                         {p}
@@ -229,7 +325,9 @@ export default function EventStream() {
                 <button
                     disabled={page === totalPages}
                     onClick={() => setPage(page + 1)}
-                    className={`px-4 py-2 rounded-lg ${page === totalPages ? "bg-gray-300 cursor-not-allowed" : "bg-blue-600 text-white hover:bg-blue-700"
+                    className={`px-4 py-2 rounded-lg ${page === totalPages
+                            ? "bg-gray-300 cursor-not-allowed"
+                            : "bg-blue-600 text-white hover:bg-blue-700"
                         }`}
                 >
                     Next
