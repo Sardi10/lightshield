@@ -23,5 +23,23 @@ namespace LightShield.Api.Models
 
         // name of the machine that sent the event
         public string Hostname { get; set; }
+
+        // "windows", "linux", "macos"
+        public string OperatingSystem { get; set; } = "unknown";
+
+        // Info, Warning, Critical
+        public string Severity { get; set; } = "Info";
+
+        // Windows-specific metadata
+        public int? EventId { get; set; }
+        public int? LogonType { get; set; }
+
+        // Both OS
+        public string? Username { get; set; }
+        public string? IPAddress { get; set; }
+
+        // GeoIP enrichment (offline-safe!)
+        public string? Country { get; set; }
+        public string? City { get; set; }
     }
 }

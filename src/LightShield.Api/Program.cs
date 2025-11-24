@@ -1,86 +1,88 @@
-using LightShield.Api.Data;
+﻿using LightShield.Api.Data;
 using LightShield.Api.Services;
-using Microsoft.EntityFrameworkCore;
 using LightShield.Api.Services.Alerts;
-using LightShield.Api.Models;
-using DotNetEnv;
-using Microsoft.Data.Sqlite;
-using System.IO;
+using Microsoft.EntityFrameworkCore;
 
-Env.Load();
+
+
+// ===================================================================
+//  Load Environment Variables
+// ===================================================================
+var envPath = Path.Combine(Directory.GetCurrentDirectory(), ".env");
+DotNetEnv.Env.Load(envPath);
+
+Console.WriteLine("Loaded .env from: " + envPath);
+Console.WriteLine("SMTP_HOST: " + Environment.GetEnvironmentVariable("SMTP_HOST"));
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add CORS before AddControllers:
-builder.Services.AddCors(options =>
+// ===================================================================
+//  Add Services
+// ===================================================================
+
+// Database
+builder.Services.AddDbContext<EventsDbContext>(options =>
 {
-    options.AddPolicy("LocalDev", policy =>
-    {
-        policy.WithOrigins("http://localhost:5173",
-                           "http://127.0.0.1:5173",
-                           "tauri://localhost"
-                           )  // your Vite dev URL
-              .AllowAnyHeader()
-              .AllowAnyMethod();
-    });
+    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection"));
 });
 
-// 1) Register controllers
-builder.Services.AddControllers();
-
-// Alerting: register both SMS and SMTP, then composite
+// Alerting Services 
 builder.Services.AddScoped<TwilioAlertService>();
 builder.Services.AddScoped<SmtpAlertService>();
 builder.Services.AddScoped<IAlertService, CompositeAlertService>();
-// Hosted service for burst detection (will use the composite)
+builder.Services.AddScoped<AlertWriterService>();
+
+// Background anomaly detection
 builder.Services.AddHostedService<AnomalyDetectionService>();
+
+// Configuration management
 builder.Services.AddScoped<ConfigurationService>();
 
-var contentRoot = Directory.GetCurrentDirectory();
-var dbPath = Path.Combine(contentRoot, "lightshield.db");
-var connBuilder = new SqliteConnectionStringBuilder { DataSource = dbPath };
+// Controllers
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.PropertyNamingPolicy = null;
+    });
 
-// Register SQLite
-builder.Services.AddDbContext<EventsDbContext>(opts =>
-    opts.UseSqlite(connBuilder.ToString()));
+// CORS
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowAnyOrigin();
+    });
+});
+
+// Swagger
+builder.Services.AddEndpointsApiExplorer();
 
 
-// 2) (Optional) Keep OpenAPI/Swagger if you like
-builder.Services.AddOpenApi();
-
-
+// ===================================================================
+//  Build App
+// ===================================================================
 var app = builder.Build();
 
-// Use CORS *before* UseAuthorization:
-app.UseCors("LocalDev");
-
-// Ensure DB & migrations are applied on startup
+// Apply EF Core migrations & checkpoint
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<EventsDbContext>();
-
-    // Force WAL  main file merge
-    db.Database.ExecuteSqlRaw("PRAGMA wal_checkpoint(FULL);");
-
-    // Apply any pending migrations
     db.Database.Migrate();
+
+    // Enable WAL mode 
+    db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
+    db.Database.ExecuteSqlRaw("PRAGMA wal_checkpoint(TRUNCATE);");
 }
 
-// 3) Enable Swagger UI in development
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
-
-// 4) Enforce HTTPS 
-if (!app.Environment.IsDevelopment())
-{
-    app.UseHttpsRedirection();
-}
+Console.WriteLine("SMTP FROM = " + builder.Configuration["ALERT_EMAIL_FROM"]);
+Console.WriteLine("SMTP TO = " + builder.Configuration["ALERT_EMAIL_TO"]);
+Console.WriteLine("SMTP HOST = " + builder.Configuration["SMTP_HOST"]);
 
 
-// 5) Map controller routes
+
+app.UseCors();
 app.MapControllers();
-
 
 app.Run();

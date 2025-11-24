@@ -16,12 +16,27 @@ namespace LightShield.Api.Services.Alerts
 
         public SmtpAlertService(IConfiguration config)
         {
-            _host = config["SMTP_HOST"];
-            _port = int.Parse(config["SMTP_PORT"] ?? "25");
-            _user = config["SMTP_USER"];
-            _pass = config["SMTP_PASS"];
-            _from = config["ALERT_EMAIL_FROM"] ?? _user;
+            // -----------------------------
+            // GMAIL SMTP (Active)
+            // -----------------------------
+            _host = config["SMTP_HOST"] ?? "smtp.gmail.com";
+            _port = int.Parse(config["SMTP_PORT"] ?? "587");
+            _user = config["SMTP_USER"];      // your gmail
+            _pass = config["SMTP_PASS"];      // gmail app password
+            _from = config["ALERT_EMAIL_FROM"];
             _to = config["ALERT_EMAIL_TO"];
+
+            // -----------------------------
+            // SENDGRID SMTP 
+            // -----------------------------
+            
+            //
+            // _host = "smtp.sendgrid.net";
+            // _port = 587;
+            // _user = "apikey";
+            // _pass = config["SENDGRID_API_KEY"];
+            // _from = config["ALERT_EMAIL_FROM"];
+            // _to = config["ALERT_EMAIL_TO"];
         }
 
         public async Task SendAlertAsync(string message)
@@ -39,6 +54,8 @@ namespace LightShield.Api.Services.Alerts
             };
 
             await client.SendMailAsync(mail);
+
+            Console.WriteLine("[Email] Alert email sent via Gmail SMTP.");
         }
     }
 }
