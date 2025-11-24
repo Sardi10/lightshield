@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using LightShield.Api.Data;
 using LightShield.Api.Models;
@@ -29,7 +29,7 @@ namespace LightShield.Api.Controllers
         {
             var query = _db.Alerts.AsQueryable();
 
-            // ---------------- SEARCH (all fields)
+            // ---------------- SEARCH ----------------
             if (!string.IsNullOrWhiteSpace(search))
             {
                 search = search.ToLower();
@@ -40,14 +40,14 @@ namespace LightShield.Api.Controllers
                 );
             }
 
-            // ---------------- DATE FILTERS
+            // ---------------- DATE FILTERS ----------------
             if (startDate.HasValue)
                 query = query.Where(a => a.Timestamp >= startDate.Value);
 
             if (endDate.HasValue)
                 query = query.Where(a => a.Timestamp <= endDate.Value);
 
-            // ---------------- SORTING
+            // ---------------- SORTING ----------------
             query = (sortBy.ToLower(), sortDir.ToLower()) switch
             {
                 ("type", "asc") => query.OrderBy(a => a.Type),
@@ -60,17 +60,29 @@ namespace LightShield.Api.Controllers
                 _ => query.OrderByDescending(a => a.Timestamp)
             };
 
-            // ---------------- PAGINATION
+            // ---------------- PAGINATION ----------------
             var totalCount = await query.CountAsync();
+
             var items = await query
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
+                .Select(a => new
+                {
+                    a.Id,
+                    Timestamp = a.Timestamp.ToUniversalTime().ToString("o"),  // ✅ FIXED
+                    a.Type,
+                    a.Message,
+                    a.Channel,
+                    a.Hostname
+                })
                 .ToListAsync();
 
             return Ok(new
             {
-                items,
-                totalCount
+                totalCount,
+                page,
+                pageSize,
+                items
             });
         }
 
