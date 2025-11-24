@@ -11,8 +11,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace LightShield.Api.Migrations
 {
     [DbContext(typeof(EventsDbContext))]
-    [Migration("20251123062259_ExpandEventModel")]
-    partial class ExpandEventModel
+    [Migration("20251123211505_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -27,6 +27,10 @@ namespace LightShield.Api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Hostname")
                         .IsRequired()
                         .HasColumnType("TEXT");
 

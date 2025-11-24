@@ -1,5 +1,13 @@
 ﻿import { useEffect, useState } from "react";
 
+// --------------------------------------------------------------------
+// FIX: Normalize timestamps before Date parsing
+// --------------------------------------------------------------------
+const normalizeTimestamp = (ts: string) => {
+    if (!ts) return ts;
+    return ts.replace(/\.\d+Z$/, "Z"); // strip microseconds
+};
+
 export default function EventStream() {
     const [events, setEvents] = useState([]);
 
@@ -19,9 +27,9 @@ export default function EventStream() {
     const [loading, setLoading] = useState(false);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-    // ======================================================================
+    // --------------------------------------------------------------------
     // Fetch events
-    // ======================================================================
+    // --------------------------------------------------------------------
     const fetchEvents = async () => {
         setLoading(true);
 
@@ -29,7 +37,7 @@ export default function EventStream() {
             page: page.toString(),
             pageSize: pageSize.toString(),
             sortBy,
-            sortDir: "desc"
+            sortDir: "desc",
         });
 
         if (search) params.append("search", search);
@@ -42,9 +50,8 @@ export default function EventStream() {
             );
             const data = await res.json();
 
+            // SAFE pagination update
             const newTotalPages = Math.ceil(data.totalCount / pageSize);
-
-            // Prevent pagination reset
             if (page > newTotalPages && newTotalPages > 0) {
                 setPage(newTotalPages);
                 setLoading(false);
@@ -52,8 +59,15 @@ export default function EventStream() {
                 return;
             }
 
-            setEvents(data.items);
+            // FIX: Normalize timestamps and store items
+            const normalized = data.items.map((e) => ({
+                ...e,
+                Timestamp: normalizeTimestamp(e.Timestamp),
+            }));
+
+            setEvents(normalized);
             setTotalCount(data.totalCount);
+
         } catch (err) {
             console.error("Failed to fetch events:", err);
         } finally {
@@ -62,24 +76,20 @@ export default function EventStream() {
         }
     };
 
-    // Fetch when filters change
     useEffect(() => {
         fetchEvents();
     }, [page, search, startDate, endDate, sortBy]);
 
-    // Auto-refresh every 5 seconds (pagination-safe)
     useEffect(() => {
         const interval = setInterval(fetchEvents, 5000);
         return () => clearInterval(interval);
     }, [page, search, startDate, endDate, sortBy]);
 
-    // ======================================================================
-    // Helper — severity badge
-    // ======================================================================
-    const badge = (sev: string) => {
-        if (!sev) return null;
-
-        const s = sev.toLowerCase();
+    // --------------------------------------------------------------------
+    // Severity badge
+    // --------------------------------------------------------------------
+    const severityBadge = (sev) => {
+        const s = (sev || "").toLowerCase();
 
         if (s === "critical")
             return (
@@ -96,16 +106,16 @@ export default function EventStream() {
             );
 
         return (
-            <span className="px-2 py-1 bg-blue-600 text-white text-xs font-bold rounded">
+            <span className="px-2 py-1 bg-blue-600 text-white text-xs rounded font-bold">
                 Info
             </span>
         );
     };
 
-    // ======================================================================
+    // --------------------------------------------------------------------
     // OS badge
-    // ======================================================================
-    const osBadge = (os: string) => {
+    // --------------------------------------------------------------------
+    const osBadge = (os) => {
         const o = (os || "").toLowerCase();
 
         if (o === "windows")
@@ -129,9 +139,9 @@ export default function EventStream() {
         );
     };
 
-    // ======================================================================
+    // --------------------------------------------------------------------
     // Pagination numbers
-    // ======================================================================
+    // --------------------------------------------------------------------
     const getPageNumbers = () => {
         const pages = [];
 
@@ -153,21 +163,38 @@ export default function EventStream() {
         return pages;
     };
 
-    // ======================================================================
+    // --------------------------------------------------------------------
     // UI
-    // ======================================================================
+    // --------------------------------------------------------------------
     return (
         <div>
 
-            {/* ---------------- FILTER BAR ---------------- */}
+            {/* HEADER */}
+            <div className="flex justify-between items-center mb-3">
+                <h2 className="text-xl font-semibold text-gray-800">
+                    Live Event Stream
+                </h2>
+
+                <button
+                    onClick={fetchEvents}
+                    disabled={loading}
+                    className="text-sm px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                >
+                    🔄 Refresh Now
+                </button>
+            </div>
+
+            {/* FILTER BAR */}
             <div className="flex flex-wrap items-end gap-4 mb-6 bg-gray-100 p-4 rounded-lg shadow-inner">
 
-                {/* Search */}
+                {/* SEARCH */}
                 <div className="flex flex-col">
-                    <label className="text-sm font-semibold text-gray-700">Search</label>
+                    <label className="text-sm font-semibold text-gray-700">
+                        Search
+                    </label>
                     <input
                         type="text"
-                        className="px-3 py-2 rounded-md border shadow-sm focus:ring focus:ring-blue-200"
+                        className="px-3 py-2 rounded-md border shadow-sm"
                         placeholder="Search all fields…"
                         value={search}
                         onChange={(e) => {
@@ -177,9 +204,11 @@ export default function EventStream() {
                     />
                 </div>
 
-                {/* Start Date */}
+                {/* START DATE */}
                 <div className="flex flex-col">
-                    <label className="text-sm font-semibold text-gray-700">Start Date</label>
+                    <label className="text-sm font-semibold text-gray-700">
+                        Start Date
+                    </label>
                     <input
                         type="date"
                         className="px-3 py-2 rounded-md border"
@@ -191,9 +220,11 @@ export default function EventStream() {
                     />
                 </div>
 
-                {/* End Date */}
+                {/* END DATE */}
                 <div className="flex flex-col">
-                    <label className="text-sm font-semibold text-gray-700">End Date</label>
+                    <label className="text-sm font-semibold text-gray-700">
+                        End Date
+                    </label>
                     <input
                         type="date"
                         className="px-3 py-2 rounded-md border"
@@ -205,9 +236,11 @@ export default function EventStream() {
                     />
                 </div>
 
-                {/* Sort By */}
+                {/* SORT */}
                 <div className="flex flex-col">
-                    <label className="text-sm font-semibold text-gray-700">Sort By</label>
+                    <label className="text-sm font-semibold text-gray-700">
+                        Sort By
+                    </label>
                     <select
                         className="px-3 py-2 rounded-md border"
                         value={sortBy}
@@ -229,21 +262,7 @@ export default function EventStream() {
                 </div>
             </div>
 
-            {/* ---------------- TITLE + REFRESH BUTTON ---------------- */}
-            <div className="flex justify-between items-center mb-3">
-                <h2 className="text-xl font-semibold">Live Event Stream</h2>
-
-                <button
-                    onClick={fetchEvents}
-                    disabled={loading}
-                    className="text-sm px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-                >
-                    <span className="text-lg">🔄</span>
-                    Refresh Now
-                </button>
-            </div>
-
-            {/* ---------------- TABLE ---------------- */}
+            {/* TABLE */}
             <div className="overflow-x-auto">
                 <table className="min-w-full bg-white rounded-lg shadow-md">
                     <thead className="bg-blue-600 text-white text-sm uppercase">
@@ -262,47 +281,41 @@ export default function EventStream() {
 
                     <tbody>
                         {events.map((e) => (
-                            <tr key={e.id} className="border-b hover:bg-blue-50 transition">
+                            <tr key={e.Id} className="border-b hover:bg-blue-50 transition">
                                 <td className="px-4 py-2">
-                                    {new Date(e.timestamp).toLocaleString()}
+                                    {new Date(e.Timestamp).toLocaleString()}
                                 </td>
-                                <td className="px-4 py-2">{e.hostname}</td>
-                                <td className="px-4 py-2">{e.type}</td>
-
-                                <td className="px-4 py-2">{badge(e.severity)}</td>
-
-                                <td className="px-4 py-2">{osBadge(e.operatingSystem)}</td>
-
-                                <td className="px-4 py-2">{e.username || "-"}</td>
-
-                                <td className="px-4 py-2">{e.ipAddress || "-"}</td>
-
+                                <td className="px-4 py-2">{e.Hostname}</td>
+                                <td className="px-4 py-2">{e.Type}</td>
+                                <td className="px-4 py-2">{severityBadge(e.Severity)}</td>
+                                <td className="px-4 py-2">{osBadge(e.OperatingSystem)}</td>
+                                <td className="px-4 py-2">{e.Username || "-"}</td>
+                                <td className="px-4 py-2">{e.IPAddress || "-"}</td>
                                 <td className="px-4 py-2">
-                                    {e.country ? `${e.city}, ${e.country}` : "-"}
+                                    {e.Country ? `${e.City}, ${e.Country}` : "-"}
                                 </td>
-
-                                <td className="px-4 py-2">{e.message}</td>
+                                <td className="px-4 py-2">{e.Message}</td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
             </div>
 
-            {/* ---------------- LAST UPDATED ---------------- */}
+            {/* LAST UPDATED */}
             {lastUpdated && (
                 <p className="text-xs text-gray-500 mt-2">
                     Last updated: {lastUpdated.toLocaleTimeString()}
                 </p>
             )}
 
-            {/* ---------------- PAGINATION ---------------- */}
+            {/* PAGINATION */}
             <div className="flex justify-center mt-6 space-x-2">
                 <button
                     disabled={page === 1}
                     onClick={() => setPage(page - 1)}
                     className={`px-4 py-2 rounded-lg ${page === 1
-                            ? "bg-gray-300 cursor-not-allowed"
-                            : "bg-blue-600 text-white hover:bg-blue-700"
+                        ? "bg-gray-300 cursor-not-allowed"
+                        : "bg-blue-600 text-white hover:bg-blue-700"
                         }`}
                 >
                     Prev
@@ -314,8 +327,8 @@ export default function EventStream() {
                         disabled={p === "..."}
                         onClick={() => typeof p === "number" && setPage(p)}
                         className={`px-3 py-2 rounded-lg ${page === p
-                                ? "bg-blue-600 text-white"
-                                : "bg-gray-200 hover:bg-gray-300"
+                            ? "bg-blue-600 text-white"
+                            : "bg-gray-200 hover:bg-gray-300"
                             }`}
                     >
                         {p}
@@ -326,8 +339,8 @@ export default function EventStream() {
                     disabled={page === totalPages}
                     onClick={() => setPage(page + 1)}
                     className={`px-4 py-2 rounded-lg ${page === totalPages
-                            ? "bg-gray-300 cursor-not-allowed"
-                            : "bg-blue-600 text-white hover:bg-blue-700"
+                        ? "bg-gray-300 cursor-not-allowed"
+                        : "bg-blue-600 text-white hover:bg-blue-700"
                         }`}
                 >
                     Next
