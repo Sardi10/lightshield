@@ -11,14 +11,44 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace LightShield.Api.Migrations
 {
     [DbContext(typeof(EventsDbContext))]
-    [Migration("20250819023744_AddUserConfigurationWithThresholds")]
-    partial class AddUserConfigurationWithThresholds
+    [Migration("20251123211505_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "7.0.20");
+
+            modelBuilder.Entity("LightShield.Api.Models.Alert", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Hostname")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("Timestamp")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Alerts");
+                });
 
             modelBuilder.Entity("LightShield.Api.Models.Anomaly", b =>
                 {
@@ -52,11 +82,34 @@ namespace LightShield.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("City")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Country")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("EventId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Hostname")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("IPAddress")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("LogonType")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("OperatingSystem")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("PathOrMessage")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Severity")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -69,6 +122,9 @@ namespace LightShield.Api.Migrations
 
                     b.Property<string>("Type")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");

@@ -27,6 +27,10 @@ namespace LightShield.Api.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Hostname")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Message")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -75,11 +79,34 @@ namespace LightShield.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("City")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Country")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("EventId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Hostname")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("IPAddress")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("LogonType")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("OperatingSystem")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("PathOrMessage")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Severity")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -92,6 +119,9 @@ namespace LightShield.Api.Migrations
 
                     b.Property<string>("Type")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
