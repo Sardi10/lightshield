@@ -45,10 +45,10 @@ namespace LightShield.Agent
             };
 
             // On each event, call our async poster
-            watcher.Created += (s, e) => OnFileEvent("Created", e.FullPath);
-            watcher.Changed += (s, e) => OnFileEvent("Changed", e.FullPath);
-            watcher.Deleted += (s, e) => OnFileEvent("Deleted", e.FullPath);
-            watcher.Renamed += (s, e) => OnFileEvent("Renamed", $"{e.OldFullPath} → {e.FullPath}");
+            watcher.Created += (s, e) => OnFileEvent("filecreate", e.FullPath);
+            watcher.Changed += (s, e) => OnFileEvent("filemodify", e.FullPath);
+            watcher.Deleted += (s, e) => OnFileEvent("filedelete", e.FullPath);
+            watcher.Renamed += (s, e) => OnFileEvent("filerename", $"{e.OldFullPath} → {e.FullPath}");
 
             Console.WriteLine("Press [Ctrl+C] to exit.");
             Thread.Sleep(Timeout.Infinite);
