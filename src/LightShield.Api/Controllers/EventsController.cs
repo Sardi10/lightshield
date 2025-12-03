@@ -44,7 +44,29 @@ namespace LightShield.Api.Controllers
         {
             evt.Timestamp = DateTime.UtcNow; // store in UTC
             evt.Type = (evt.Type ?? "").Trim().ToLowerInvariant();
+
+            // Normalize file operation types
+            if (evt.Type == "filecreate")
+            {
+                evt.Type = "filecreate";
+            }
+            else if (evt.Type == "filemodify")
+            {
+                evt.Type = "filemodify";
+            }
+            else if (evt.Type == "filedelete")
+            {
+                evt.Type = "filedelete";
+            }
+            else if (evt.Type == "filerename")
+            {
+                // Renames are used for encryption detection
+                evt.Type = "filerename";
+            }
+            
+
             evt.OperatingSystem = evt.OperatingSystem?.ToLower() ?? "unknown";
+
 
             evt.Severity = ClassifySeverity(evt);
             await TryGeoEnrich(evt);
@@ -152,11 +174,29 @@ namespace LightShield.Api.Controllers
         // ======================================================================
         private static string ClassifySeverity(Event evt)
         {
-            if (evt.Type.Contains("loginfailureburst")) return "Critical";
-            if (evt.Type.Contains("loginfailure")) return "Warning";
-            if (evt.Type.Contains("unauthorized")) return "Critical";
+            string t = evt.Type.ToLowerInvariant();
+
+            // ============================
+            // LOGIN-RELATED
+            // ============================
+            if (t.Contains("loginfailureburst")) return "Critical";
+            if (t.Contains("loginfailure")) return "Warning";
+            if (t.Contains("unauthorized")) return "Critical";
+
+            // ============================
+            // FILE TAMPERING
+            // ============================
+            if (t == "filedelete") return "Critical";     // deleting files = high severity
+            if (t == "filerename") return "Critical";     // encryption typically renames extensions
+            if (t == "filemodify") return "Warning";      // modifying files = suspicious
+            if (t == "filecreate") return "Warning";      // malware often drops many files
+
+            // ============================
+            // DEFAULT
+            // ============================
             return "Info";
         }
+
 
         // ======================================================================
         // Geo Enrichment (safe if offline)
