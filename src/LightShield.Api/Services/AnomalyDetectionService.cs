@@ -105,40 +105,139 @@ namespace LightShield.Api.Services
             var cutoff = DateTime.UtcNow.AddMinutes(-5);
 
             var recentFileEvents = await db.Events
-                .Where(e => e.Type == "FileTamper" && e.Timestamp >= cutoff)
+                .Where(e =>
+                       (e.Type == "filecreate" ||
+                        e.Type == "filemodify" ||
+                        e.Type == "filedelete" ||
+                        e.Type == "filerename")
+                        && e.Timestamp >= cutoff)
                 .ToListAsync(stoppingToken);
 
             var groupedByHost = recentFileEvents.GroupBy(e => e.Hostname);
 
+            // thresholds — configurable if desired
+            const int CREATE_THRESHOLD = 75;
+            const int MODIFY_THRESHOLD = 100;
+            const int DELETE_THRESHOLD = 20;
+            const int RENAME_THRESHOLD = 10;
+
             foreach (var group in groupedByHost)
             {
-                if (group.Count() >= 10)
+                int creates = group.Count(e => e.Type == "filecreate");
+                int modifies = group.Count(e => e.Type == "filemodify");
+                int deletes = group.Count(e => e.Type == "filedelete");
+                int renames = group.Count(e => e.Type == "filerename");
+
+                // ============================
+                // FILE CREATE BURST
+                // ============================
+                if (creates >= CREATE_THRESHOLD)
                 {
-                    var anomaly = new Anomaly
-                    {
-                        Type = "FileTamperBurst",
-                        Description = $"{group.Count()} suspicious file modifications in last 5 minutes.",
-                        Hostname = group.Key,
-                        Timestamp = DateTime.UtcNow
-                    };
-
-                    db.Anomalies.Add(anomaly);
-                    await db.SaveChangesAsync(stoppingToken);
-
-                    _logger.LogWarning(
-                        "Anomaly detected: {Description} on host {Hostname}",
-                        anomaly.Description,
-                        anomaly.Hostname
+                    await TriggerAnomaly(
+                        alertWriter,
+                        db,
+                        group.Key,
+                        "FileCreateBurst",
+                        $"{creates} files created in last 5 minutes.",
+                        stoppingToken
                     );
+                }
 
-                    // CREATE ALERT AND SEND NOTIFICATIONS
-                    await alertWriter.CreateAndSendAlertAsync(
-                        anomaly.Type,
-                        anomaly.Description,
-                        anomaly.Hostname
+                // ============================
+                // FILE MODIFY BURST
+                // ============================
+                if (modifies >= MODIFY_THRESHOLD)
+                {
+                    await TriggerAnomaly(
+                        alertWriter,
+                        db,
+                        group.Key,
+                        "FileModifyBurst",
+                        $"{modifies} files modified in last 5 minutes.",
+                        stoppingToken
+                    );
+                }
+
+                // ============================
+                // FILE DELETE BURST
+                // ============================
+                if (deletes >= DELETE_THRESHOLD)
+                {
+                    await TriggerAnomaly(
+                        alertWriter,
+                        db,
+                        group.Key,
+                        "FileDeleteBurst",
+                        $"{deletes} files deleted in last 5 minutes.",
+                        stoppingToken
+                    );
+                }
+
+                // ============================
+                // FILE RENAME BURST
+                // ============================
+                if (renames >= RENAME_THRESHOLD)
+                {
+                    await TriggerAnomaly(
+                        alertWriter,
+                        db,
+                        group.Key,
+                        "FileRenameBurst",
+                        $"{renames} files renamed in last 5 minutes.",
+                        stoppingToken
+                    );
+                }
+
+                // ============================
+                // RANSOMWARE / ENCRYPTION DETECTION
+                // ============================
+                if (modifies >= MODIFY_THRESHOLD / 2 && renames >= RENAME_THRESHOLD / 2)
+                {
+                    await TriggerAnomaly(
+                        alertWriter,
+                        db,
+                        group.Key,
+                        "FileEncryptionBurst",
+                        $"Possible ransomware: {modifies} modifications + {renames} renames in last 5 minutes.",
+                        stoppingToken
                     );
                 }
             }
+        }
+
+        // ===================================================================
+        //  REUSABLE ANOMALY + ALERT CREATION HELPER
+        // ===================================================================
+        private async Task TriggerAnomaly(
+            AlertWriterService alertWriter,
+            EventsDbContext db,
+            string hostname,
+            string type,
+            string description,
+            CancellationToken token = default)
+        {
+            var anomaly = new Anomaly
+            {
+                Type = type,
+                Description = description,
+                Hostname = hostname,
+                Timestamp = DateTime.UtcNow
+            };
+
+            db.Anomalies.Add(anomaly);
+            await db.SaveChangesAsync(token);
+
+            _logger.LogWarning(
+                "Anomaly detected: {Description} on host {Hostname}",
+                anomaly.Description,
+                anomaly.Hostname
+            );
+
+            await alertWriter.CreateAndSendAlertAsync(
+                anomaly.Type,
+                anomaly.Description,
+                anomaly.Hostname
+            );
         }
     }
 }
