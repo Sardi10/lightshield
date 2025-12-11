@@ -45,5 +45,20 @@ namespace LightShield.Api.Services
             var config = await GetConfigAsync();
             return config?.MaxFileModifies ?? 100;
         }
+
+        public async Task<string?> GetEmailAsync()
+        {
+            var cfg = await _db.Set<UserConfiguration>().FirstOrDefaultAsync();
+
+            return cfg?.Email;
+        }
+
+        public async Task<string?> GetPhoneAsync()
+        {
+            var cfg = await _db.Set<UserConfiguration>().FirstOrDefaultAsync();
+
+            return cfg?.PhoneNumber;
+        }
+
     }
 }

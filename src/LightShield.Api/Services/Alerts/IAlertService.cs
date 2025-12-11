@@ -4,6 +4,6 @@ namespace LightShield.Api.Services.Alerts
 {
     public interface IAlertService
     {
-        Task SendAlertAsync(string message);
+        Task SendAlertAsync(string email, string phone, string message);
     }
 }
