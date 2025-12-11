@@ -24,14 +24,25 @@ namespace LightShield.Common.Api
                 try
                 {
                     var resp = await _http.PostAsJsonAsync(_eventsEndpoint, evt);
-                    return resp.IsSuccessStatusCode;
+
+                    if (!resp.IsSuccessStatusCode)
+                    {
+                        var body = await resp.Content.ReadAsStringAsync();
+                        Console.WriteLine($"[Agent API Error] Attempt={attempt} Status={resp.StatusCode} Body={body}");
+                        return false;
+                    }
+
+                    return true;
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Console.WriteLine($"[Agent Exception] Attempt={attempt} Error={ex.Message}");
                     await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
                 }
             }
+
             return false;
         }
+
     }
 }
