@@ -10,12 +10,4 @@
 	  <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="System.Diagnostics.EventLog" Version="9.0.5" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\LightShield.Common\LightShield.Common.csproj" />
-  </ItemGroup>
-
 </Project>

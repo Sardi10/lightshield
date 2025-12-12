@@ -15,12 +15,23 @@ namespace LightShield.Api.Services.Alerts
             _email = email;
         }
 
-        public async Task SendAlertAsync(string message)
+        public async Task SendAlertAsync(string email, string phone, string message)
         {
-            // send both in parallel
-            var smsTask = _sms.SendAlertAsync(message);
-            var emailTask = _email.SendAlertAsync(message);
-            await Task.WhenAll(smsTask, emailTask);
+            var tasks = new List<Task>();
+
+            // Send email if user provided email
+            if (!string.IsNullOrWhiteSpace(email))
+                tasks.Add(_email.SendAlertAsync(email, message));
+
+            // Send SMS if user provided phone
+            if (!string.IsNullOrWhiteSpace(phone))
+                tasks.Add(_sms.SendAlertAsync(phone, message));
+
+            // If no channels configured, do nothing
+            if (tasks.Count == 0)
+                return;
+
+            await Task.WhenAll(tasks);
         }
     }
 }

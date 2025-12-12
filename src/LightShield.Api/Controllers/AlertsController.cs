@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using LightShield.Api.Data;
 using LightShield.Api.Models;
 using LightShield.Api.Services.Alerts;
+using LightShield.Api.Services;   // <-- needed for ConfigurationService
 
 namespace LightShield.Api.Controllers
 {
@@ -11,12 +12,17 @@ namespace LightShield.Api.Controllers
     public class AlertsController : ControllerBase
     {
         private readonly EventsDbContext _db;
+        private readonly ConfigurationService _config;
 
-        public AlertsController(EventsDbContext db)
+        public AlertsController(EventsDbContext db, ConfigurationService config)
         {
             _db = db;
+            _config = config;
         }
 
+        // --------------------------------------------------------------------
+        // GET /api/alerts   (pagination, sorting, filtering)
+        // --------------------------------------------------------------------
         [HttpGet]
         public async Task<IActionResult> Get(
             string? search,
@@ -29,7 +35,6 @@ namespace LightShield.Api.Controllers
         {
             var query = _db.Alerts.AsQueryable();
 
-            // ---------------- SEARCH ----------------
             if (!string.IsNullOrWhiteSpace(search))
             {
                 search = search.ToLower();
@@ -40,14 +45,12 @@ namespace LightShield.Api.Controllers
                 );
             }
 
-            // ---------------- DATE FILTERS ----------------
             if (startDate.HasValue)
                 query = query.Where(a => a.Timestamp >= startDate.Value);
 
             if (endDate.HasValue)
                 query = query.Where(a => a.Timestamp <= endDate.Value);
 
-            // ---------------- SORTING ----------------
             query = (sortBy.ToLower(), sortDir.ToLower()) switch
             {
                 ("type", "asc") => query.OrderBy(a => a.Type),
@@ -60,7 +63,6 @@ namespace LightShield.Api.Controllers
                 _ => query.OrderByDescending(a => a.Timestamp)
             };
 
-            // ---------------- PAGINATION ----------------
             var totalCount = await query.CountAsync();
 
             var items = await query
@@ -69,7 +71,7 @@ namespace LightShield.Api.Controllers
                 .Select(a => new
                 {
                     a.Id,
-                    Timestamp = a.Timestamp.ToUniversalTime().ToString("o"),  // ✅ FIXED
+                    Timestamp = a.Timestamp.ToUniversalTime().ToString("o"),
                     a.Type,
                     a.Message,
                     a.Channel,
@@ -86,12 +88,24 @@ namespace LightShield.Api.Controllers
             });
         }
 
-        [HttpGet("test-email")]
-        public async Task<IActionResult> TestEmail([FromServices] IAlertService alertService)
+        // --------------------------------------------------------------------
+        // TEST ALERT ENDPOINT
+        // --------------------------------------------------------------------
+        [HttpGet("test")]
+        public async Task<IActionResult> TestAlert(
+            [FromServices] IAlertService alertService)
         {
-            await alertService.SendAlertAsync("This is a LightShield test alert email.");
-            return Ok("Test email sent successfully.");
-        }
+            var email = await _config.GetEmailAsync();
+            var phone = await _config.GetPhoneAsync();
 
+            if (string.IsNullOrWhiteSpace(email) && string.IsNullOrWhiteSpace(phone))
+                return BadRequest("No email or phone number is configured.");
+
+            string message = "[LightShield Test Alert]\nThis is a test notification.";
+
+            await alertService.SendAlertAsync(email, phone, message);
+
+            return Ok("Test alert sent successfully.");
+        }
     }
 }

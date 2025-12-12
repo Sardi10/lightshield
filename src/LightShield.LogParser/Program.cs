@@ -23,7 +23,10 @@ namespace LightShield.LogParser
             // ------------------------------------------------------------
             // API URL
             // ------------------------------------------------------------
-            var apiUrl = Environment.GetEnvironmentVariable("LIGHTSHIELD_API_URL");
+            //var apiUrl = Environment.GetEnvironmentVariable("LIGHTSHIELD_API_URL");
+            var cfg = ConfigLoader.LoadConfig();
+            var apiUrl = cfg["apiUrl"];
+
 
             if (!string.IsNullOrEmpty(apiUrl))
             {
