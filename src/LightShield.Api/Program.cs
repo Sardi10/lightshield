@@ -16,7 +16,7 @@ Console.WriteLine("Embedded resources:");
 foreach (var r in assembly.GetManifestResourceNames())
     Console.WriteLine(" - " + r);
 
-// The correct name will be "LightShield.Api._env" for a file named ".env"
+// The correct name will be  "LightShield.Api._env" for a file named ".env"
 var resource = assembly.GetManifestResourceStream("LightShield.Api..env");
 
 if (resource == null)
