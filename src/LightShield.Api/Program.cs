@@ -2,28 +2,62 @@
 using LightShield.Api.Services;
 using LightShield.Api.Services.Alerts;
 using Microsoft.EntityFrameworkCore;
-
-
+using System.Reflection;
+using DotNetEnv;
 
 // ===================================================================
-//  Load Environment Variables
+//  Load Embedded .env
 // ===================================================================
-var envPath = Path.Combine(Directory.GetCurrentDirectory(), ".env");
-DotNetEnv.Env.Load(envPath);
 
-Console.WriteLine("Loaded .env from: " + envPath);
-Console.WriteLine("SMTP_HOST: " + Environment.GetEnvironmentVariable("SMTP_HOST"));
+var assembly = Assembly.GetExecutingAssembly();
+
+// IMPORTANT: list all embedded resources to confirm name
+Console.WriteLine("Embedded resources:");
+foreach (var r in assembly.GetManifestResourceNames())
+    Console.WriteLine(" - " + r);
+
+// The correct name will be "LightShield.Api._env" for a file named ".env"
+var resource = assembly.GetManifestResourceStream("LightShield.Api..env");
+
+if (resource == null)
+{
+    Console.WriteLine("ERROR: Embedded .env NOT FOUND!");
+}
+else
+{
+    Env.Load(resource);
+    Console.WriteLine("Loaded embedded .env");
+}
+
+// ===================================================================
+//  Configure ProgramData Database Path
+// ===================================================================
+
+var dataDir = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+    "LightShield"
+);
+
+Directory.CreateDirectory(dataDir);
+
+var dbPath = Path.Combine(dataDir, "events.db");
+Console.WriteLine("Using DB at: " + dbPath);
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.ListenLocalhost(5213);
+});
 
 // ===================================================================
 //  Add Services
 // ===================================================================
 
-// Database
+// Database using ProgramData path
 builder.Services.AddDbContext<EventsDbContext>(options =>
 {
-    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection"));
+    options.UseSqlite($"Data Source={dbPath}");
 });
 
 // Alerting Services 
@@ -38,14 +72,11 @@ builder.Services.AddHostedService<AnomalyDetectionService>();
 // Configuration management
 builder.Services.AddScoped<ConfigurationService>();
 
-// Controllers
-builder.Services.AddControllers()
-    .AddJsonOptions(options =>
-    {
-        options.JsonSerializerOptions.PropertyNamingPolicy = null;
-    });
+builder.Services.AddControllers().AddJsonOptions(options =>
+{
+    options.JsonSerializerOptions.PropertyNamingPolicy = null;
+});
 
-// CORS
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
@@ -56,33 +87,24 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Swagger
 builder.Services.AddEndpointsApiExplorer();
-
 
 // ===================================================================
 //  Build App
 // ===================================================================
+
 var app = builder.Build();
 
-// Apply EF Core migrations & checkpoint
+// Run DB migrations
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<EventsDbContext>();
     db.Database.Migrate();
 
-    // Enable WAL mode 
     db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
     db.Database.ExecuteSqlRaw("PRAGMA wal_checkpoint(TRUNCATE);");
 }
 
-Console.WriteLine("SMTP FROM = " + builder.Configuration["ALERT_EMAIL_FROM"]);
-Console.WriteLine("SMTP TO = " + builder.Configuration["ALERT_EMAIL_TO"]);
-Console.WriteLine("SMTP HOST = " + builder.Configuration["SMTP_HOST"]);
-
-
-
 app.UseCors();
 app.MapControllers();
-
 app.Run();

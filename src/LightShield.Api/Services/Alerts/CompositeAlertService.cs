@@ -7,7 +7,9 @@ namespace LightShield.Api.Services.Alerts
         private readonly TwilioAlertService _sms;
         private readonly SmtpAlertService _email;
 
-        public CompositeAlertService(TwilioAlertService sms, SmtpAlertService email)
+        public CompositeAlertService(
+            TwilioAlertService sms,
+            SmtpAlertService email)
         {
             _sms = sms;
             _email = email;
@@ -15,15 +17,21 @@ namespace LightShield.Api.Services.Alerts
 
         public async Task SendAlertAsync(string email, string phone, string message)
         {
-            var smsTask = string.IsNullOrWhiteSpace(phone)
-                ? Task.CompletedTask
-                : _sms.SendAlertAsync(phone, message);
+            var tasks = new List<Task>();
 
-            var emailTask = string.IsNullOrWhiteSpace(email)
-                ? Task.CompletedTask
-                : _email.SendAlertAsync(email, message);
+            // Send email if user provided email
+            if (!string.IsNullOrWhiteSpace(email))
+                tasks.Add(_email.SendAlertAsync(email, message));
 
-            await Task.WhenAll(smsTask, emailTask);
+            // Send SMS if user provided phone
+            if (!string.IsNullOrWhiteSpace(phone))
+                tasks.Add(_sms.SendAlertAsync(phone, message));
+
+            // If no channels configured, do nothing
+            if (tasks.Count == 0)
+                return;
+
+            await Task.WhenAll(tasks);
         }
     }
 }

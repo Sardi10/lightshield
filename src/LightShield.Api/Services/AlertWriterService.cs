@@ -28,6 +28,9 @@ namespace LightShield.Api.Services
 
         public async Task CreateAndSendAlertAsync(string type, string description, string hostname)
         {
+            // --------------------------------------------
+            // 1) Save alert to DB
+            // --------------------------------------------
             var alert = new Alert
             {
                 Timestamp = DateTime.UtcNow,
@@ -40,6 +43,9 @@ namespace LightShield.Api.Services
             _db.Alerts.Add(alert);
             await _db.SaveChangesAsync();
 
+            // --------------------------------------------
+            // 2) Format message for SMS + email
+            // --------------------------------------------
             string localTime = alert.Timestamp.ToLocalTime().ToString("f");
 
             string formattedMessage =
@@ -49,20 +55,39 @@ namespace LightShield.Api.Services
                 $"When: {localTime} (local time)\n" +
                 $"Details: {alert.Message}";
 
+            // --------------------------------------------
+            // 3) Retrieve dynamic user configuration
+            // --------------------------------------------
+            string? email = await _config.GetEmailAsync();
+            string? phone = await _config.GetPhoneAsync();
+
+            if (string.IsNullOrWhiteSpace(email) && string.IsNullOrWhiteSpace(phone))
+            {
+                _logger.LogWarning(
+                    "Alert generated but no delivery channels configured. User email/phone not set."
+                );
+                return;
+            }
+
+            // --------------------------------------------
+            // 4) Deliver alert through CompositeAlertService
+            // --------------------------------------------
             try
             {
-                // Get dynamic email + phone from DB
-                var email = await _config.GetEmailAsync();
-                var phone = await _config.GetPhoneAsync();
-
-                // Pass into composite alert service
                 await _alertService.SendAlertAsync(email, phone, formattedMessage);
 
-                _logger.LogInformation("Alert created + notification sent: {Message}", formattedMessage);
+                _logger.LogInformation(
+                    "Alert created + notification delivered. Type={Type}, Host={Host}",
+                    alert.Type,
+                    alert.Hostname
+                );
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to send notification for alert.");
+                _logger.LogError(
+                    ex,
+                    "Alert was saved to DB but FAILED to deliver via email/SMS."
+                );
             }
         }
     }

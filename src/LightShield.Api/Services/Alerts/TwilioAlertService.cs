@@ -21,15 +21,32 @@ namespace LightShield.Api.Services.Alerts
 
         public async Task SendAlertAsync(string toPhone, string message)
         {
+            // Do not even attempt sending if SMS is not configured
+            if (string.IsNullOrWhiteSpace(_accountSid) ||
+                string.IsNullOrWhiteSpace(_authToken) ||
+                string.IsNullOrWhiteSpace(_fromNumber))
+            {
+                Console.WriteLine("[Twilio] SMS sending skipped: Twilio credentials missing.");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(toPhone))
+            {
+                Console.WriteLine("[Twilio] SMS sending skipped: No recipient phone.");
+                return;
+            }
+
             try
             {
                 TwilioClient.Init(_accountSid, _authToken);
 
-                await MessageResource.CreateAsync(
+                var msg = await MessageResource.CreateAsync(
                     body: message,
                     from: new Twilio.Types.PhoneNumber(_fromNumber),
                     to: new Twilio.Types.PhoneNumber(toPhone)
                 );
+
+                Console.WriteLine($"[Twilio] SMS sent. SID={msg.Sid}");
             }
             catch (Exception ex)
             {

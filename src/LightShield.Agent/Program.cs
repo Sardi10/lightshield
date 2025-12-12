@@ -16,7 +16,10 @@ namespace LightShield.Agent
         static void Main(string[] args)
         {
             // 1. Initialize API client
-            var apiUrl = Environment.GetEnvironmentVariable("LIGHTSHIELD_API_URL");
+            //var apiUrl = Environment.GetEnvironmentVariable("LIGHTSHIELD_API_URL");
+            var cfg = ConfigLoader.LoadConfig();
+            var apiUrl = cfg["apiUrl"];
+
             if (!string.IsNullOrWhiteSpace(apiUrl))
             {
                 apiClient = new LightShieldApiClient(new HttpClient(), apiUrl);
