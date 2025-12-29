@@ -56,42 +56,45 @@ namespace LightShield.Api.Services
 
             var cutoff = DateTime.UtcNow.AddMinutes(-5);
 
-            var recentFailedEvents = await db.Events
-                .Where(e => e.Type == "FailedLogin" && e.Timestamp >= cutoff)
+            var failedLogins = await db.Events
+                .Where(e =>
+                    e.Type == "FailedLogin" &&
+                    e.Timestamp >= cutoff)
                 .ToListAsync(stoppingToken);
 
-            var groupedByHost = recentFailedEvents.GroupBy(e => e.Hostname);
+            var groupedByHost = failedLogins.GroupBy(e => e.Hostname);
+
+            const int FAILED_LOGIN_THRESHOLD = 5;
+            var quietTime = TimeSpan.FromSeconds(60);
 
             foreach (var group in groupedByHost)
             {
-                if (group.Count() >= 5)
+                int count = group.Count();
+
+                if (count >= FAILED_LOGIN_THRESHOLD)
                 {
-                    var anomaly = new Anomaly
-                    {
-                        Type = "FailedLoginBurst",
-                        Description = $"{group.Count()} failed login attempts in the last 5 minutes.",
-                        Hostname = group.Key,
-                        Timestamp = DateTime.UtcNow
-                    };
-
-                    db.Anomalies.Add(anomaly);
-                    await db.SaveChangesAsync(stoppingToken);
-
-                    _logger.LogWarning(
-                        "Anomaly detected: {Description} on host {Hostname}",
-                        anomaly.Description,
-                        anomaly.Hostname
-                    );
-
-                    // CREATE ALERT (stored in Alerts table) + SEND EMAIL + SMS
-                    await alertWriter.CreateAndSendAlertAsync(
-                        anomaly.Type,
-                        anomaly.Description,
-                        anomaly.Hostname
+                    await HandleIncidentAsync(
+                        db,
+                        alertWriter,
+                        group.Key,
+                        "FailedLoginBurst",
+                        count,
+                        quietTime,
+                        stoppingToken
                     );
                 }
             }
+
+            await CloseStaleIncidentsAsync(
+                db,
+                alertWriter,
+                "FailedLoginBurst",
+                quietTime,
+                stoppingToken
+            );
+
         }
+
 
         // ===================================================================
         //  FILE TAMPER BURST DETECTION
@@ -106,20 +109,22 @@ namespace LightShield.Api.Services
 
             var recentFileEvents = await db.Events
                 .Where(e =>
-                       (e.Type == "filecreate" ||
-                        e.Type == "filemodify" ||
-                        e.Type == "filedelete" ||
-                        e.Type == "filerename")
-                        && e.Timestamp >= cutoff)
+                    (e.Type == "filecreate" ||
+                     e.Type == "filemodify" ||
+                     e.Type == "filedelete" ||
+                     e.Type == "filerename") &&
+                    e.Timestamp >= cutoff)
                 .ToListAsync(stoppingToken);
 
             var groupedByHost = recentFileEvents.GroupBy(e => e.Hostname);
 
-            // thresholds — configurable if desired
+            // thresholds (same as before)
             const int CREATE_THRESHOLD = 75;
             const int MODIFY_THRESHOLD = 100;
             const int DELETE_THRESHOLD = 20;
             const int RENAME_THRESHOLD = 10;
+
+            var quietTime = TimeSpan.FromSeconds(15);
 
             foreach (var group in groupedByHost)
             {
@@ -133,12 +138,13 @@ namespace LightShield.Api.Services
                 // ============================
                 if (creates >= CREATE_THRESHOLD)
                 {
-                    await TriggerAnomaly(
-                        alertWriter,
+                    await HandleIncidentAsync(
                         db,
+                        alertWriter,
                         group.Key,
                         "FileCreateBurst",
-                        $"{creates} files created in last 5 minutes.",
+                        creates,
+                        quietTime,
                         stoppingToken
                     );
                 }
@@ -148,12 +154,13 @@ namespace LightShield.Api.Services
                 // ============================
                 if (modifies >= MODIFY_THRESHOLD)
                 {
-                    await TriggerAnomaly(
-                        alertWriter,
+                    await HandleIncidentAsync(
                         db,
+                        alertWriter,
                         group.Key,
                         "FileModifyBurst",
-                        $"{modifies} files modified in last 5 minutes.",
+                        modifies,
+                        quietTime,
                         stoppingToken
                     );
                 }
@@ -163,12 +170,13 @@ namespace LightShield.Api.Services
                 // ============================
                 if (deletes >= DELETE_THRESHOLD)
                 {
-                    await TriggerAnomaly(
-                        alertWriter,
+                    await HandleIncidentAsync(
                         db,
+                        alertWriter,
                         group.Key,
                         "FileDeleteBurst",
-                        $"{deletes} files deleted in last 5 minutes.",
+                        deletes,
+                        quietTime,
                         stoppingToken
                     );
                 }
@@ -178,66 +186,143 @@ namespace LightShield.Api.Services
                 // ============================
                 if (renames >= RENAME_THRESHOLD)
                 {
-                    await TriggerAnomaly(
-                        alertWriter,
+                    await HandleIncidentAsync(
                         db,
+                        alertWriter,
                         group.Key,
                         "FileRenameBurst",
-                        $"{renames} files renamed in last 5 minutes.",
+                        renames,
+                        quietTime,
                         stoppingToken
                     );
                 }
 
                 // ============================
-                // RANSOMWARE / ENCRYPTION DETECTION
+                // RANSOMWARE / ENCRYPTION
                 // ============================
-                if (modifies >= MODIFY_THRESHOLD / 2 && renames >= RENAME_THRESHOLD / 2)
+                if (modifies >= MODIFY_THRESHOLD / 2 &&
+                    renames >= RENAME_THRESHOLD / 2)
                 {
-                    await TriggerAnomaly(
-                        alertWriter,
+                    await HandleIncidentAsync(
                         db,
+                        alertWriter,
                         group.Key,
                         "FileEncryptionBurst",
-                        $"Possible ransomware: {modifies} modifications + {renames} renames in last 5 minutes.",
+                        modifies + renames,
+                        quietTime,
                         stoppingToken
                     );
                 }
             }
+
+            // ============================
+            // CLOSE INCIDENTS AFTER QUIET TIME
+            // ============================
+            await CloseStaleIncidentsAsync(db, alertWriter, "FileCreateBurst", quietTime, stoppingToken);
+            await CloseStaleIncidentsAsync(db, alertWriter, "FileModifyBurst", quietTime, stoppingToken);
+            await CloseStaleIncidentsAsync(db, alertWriter, "FileDeleteBurst", quietTime, stoppingToken);
+            await CloseStaleIncidentsAsync(db, alertWriter, "FileRenameBurst", quietTime, stoppingToken);
+            await CloseStaleIncidentsAsync(db, alertWriter, "FileEncryptionBurst", quietTime, stoppingToken);
+
         }
 
-        // ===================================================================
-        //  REUSABLE ANOMALY + ALERT CREATION HELPER
-        // ===================================================================
-        private async Task TriggerAnomaly(
-            AlertWriterService alertWriter,
+
+        private async Task HandleIncidentAsync(
             EventsDbContext db,
+            AlertWriterService alertWriter,
             string hostname,
             string type,
-            string description,
-            CancellationToken token = default)
+            int currentCount,
+            TimeSpan quietTime,
+            CancellationToken token)
         {
-            var anomaly = new Anomaly
+            var now = DateTime.UtcNow;
+
+            var incident = await db.IncidentStates
+                .FirstOrDefaultAsync(i =>
+                    i.Type == type &&
+                    i.Hostname == hostname &&
+                    i.IsActive,
+                    token);
+
+            // ============================
+            // OPEN INCIDENT
+            // ============================
+            if (incident == null)
             {
-                Type = type,
-                Description = description,
-                Hostname = hostname,
-                Timestamp = DateTime.UtcNow
-            };
+                incident = new IncidentState
+                {
+                    Type = type,
+                    Hostname = hostname,
+                    StartTime = now,
+                    LastEventTime = now,
+                    Count = currentCount,
+                    IsActive = true
+                };
 
-            db.Anomalies.Add(anomaly);
+                db.IncidentStates.Add(incident);
+                await db.SaveChangesAsync(token);
+
+                await alertWriter.CreateAndSendAlertAsync(
+                    type,
+                    $"Incident started: {currentCount} events detected.",
+                    hostname
+                );
+
+                _logger.LogWarning(
+                    "Incident OPENED: {Type} on {Host} ({Count} events)",
+                    type, hostname, currentCount
+                );
+
+                return;
+            }
+
+            // ============================
+            // UPDATE INCIDENT
+            // ============================
+            incident.LastEventTime = now;
+            incident.Count += (currentCount - incident.Count > 0 ? currentCount - incident.Count : 0);
+
             await db.SaveChangesAsync(token);
-
-            _logger.LogWarning(
-                "Anomaly detected: {Description} on host {Hostname}",
-                anomaly.Description,
-                anomaly.Hostname
-            );
-
-            await alertWriter.CreateAndSendAlertAsync(
-                anomaly.Type,
-                anomaly.Description,
-                anomaly.Hostname
-            );
         }
+
+        private async Task CloseStaleIncidentsAsync(
+            EventsDbContext db,
+            AlertWriterService alertWriter,
+            string incidentType,
+            TimeSpan quietTime,
+            CancellationToken token)
+
+        {
+            var now = DateTime.UtcNow;
+
+            var staleIncidents = await db.IncidentStates
+                .Where(i =>
+                    i.IsActive &&
+                    i.Type == incidentType &&
+                    now - i.LastEventTime > quietTime)
+                .ToListAsync(token);
+
+
+            foreach (var incident in staleIncidents)
+            {
+                incident.IsActive = false;
+                await db.SaveChangesAsync(token);
+
+                await alertWriter.CreateAndSendAlertAsync(
+                    incident.Type,
+                    $"Incident ended. Total events: {incident.Count}. " +
+                    $"Duration: {(incident.LastEventTime - incident.StartTime).TotalSeconds:F1}s",
+                    incident.Hostname
+                );
+
+                _logger.LogInformation(
+                    "Incident CLOSED: {Type} on {Host} (Total={Count})",
+                    incident.Type, incident.Hostname, incident.Count
+                );
+            }
+        }
+
+
     }
 }
