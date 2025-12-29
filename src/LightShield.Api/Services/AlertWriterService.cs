@@ -4,6 +4,8 @@ using Microsoft.Extensions.Logging;
 using LightShield.Api.Data;
 using LightShield.Api.Models;
 using LightShield.Api.Services.Alerts;
+using Microsoft.EntityFrameworkCore;
+
 
 namespace LightShield.Api.Services
 {
@@ -26,8 +28,27 @@ namespace LightShield.Api.Services
             _logger = logger;
         }
 
-        public async Task CreateAndSendAlertAsync(string type, string description, string hostname)
+        public async Task CreateAndSendAlertAsync(string type, string description, string hostname, string phase)
         {
+            // ----------------------------------------------------
+            // 0) ANTI-SPAM DUPLICATE SUPPRESSION (HARD SAFETY NET)
+            // ----------------------------------------------------
+            var recent = await _db.Alerts.AnyAsync(a =>
+                a.Type == type &&
+                a.Hostname == hostname &&
+                a.Phase == phase &&
+                a.Timestamp > DateTime.UtcNow.AddSeconds(-30));
+
+            if (recent)
+            {
+                _logger.LogWarning(
+                    "Alert suppressed (duplicate {Phase} within 30s): {Type} on {Host}",
+                    type,
+                    hostname
+                );
+                return;
+            }
+
             // --------------------------------------------
             // 1) Save alert to DB
             // --------------------------------------------
@@ -35,6 +56,7 @@ namespace LightShield.Api.Services
             {
                 Timestamp = DateTime.UtcNow,
                 Type = type,
+                Phase = phase,
                 Message = description,
                 Hostname = hostname,
                 Channel = "Email/SMS"

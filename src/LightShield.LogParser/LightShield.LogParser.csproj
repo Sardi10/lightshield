@@ -10,7 +10,14 @@
 	  <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
 
-  <ItemGroup>
+	<ItemGroup>
+		<None Update="lightshield_config.json">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</None>
+	</ItemGroup>
+
+	<ItemGroup>
     <PackageReference Include="System.Diagnostics.EventLog" Version="9.0.5" />
   </ItemGroup>
 

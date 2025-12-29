@@ -39,6 +39,10 @@ namespace LightShield.Api.Data
                     v => v.ToUniversalTime().ToString("o"),
                     v => DateTime.Parse(v).ToUniversalTime()
                 );
+
+            modelBuilder.Entity<IncidentState>()
+           .HasIndex(i => new { i.Type, i.Hostname })
+           .IsUnique();
         }
     }
 }
