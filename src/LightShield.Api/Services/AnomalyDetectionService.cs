@@ -58,7 +58,7 @@ namespace LightShield.Api.Services
 
             var failedLogins = await db.Events
                 .Where(e =>
-                    e.Type == "FailedLogin" &&
+                    e.Type == "failedlogin" &&
                     e.Timestamp >= cutoff)
                 .ToListAsync(stoppingToken);
 
@@ -267,13 +267,22 @@ namespace LightShield.Api.Services
                 };
 
                 db.IncidentStates.Add(incident);
+
+                db.Anomalies.Add(new Anomaly
+                {
+                    Timestamp = now,
+                    Type = type,
+                    Description = $"Incident STARTED. Initial count: {currentCount}.",
+                    Hostname = hostname
+                });
+
                 await db.SaveChangesAsync(token);
 
                 await alertWriter.CreateAndSendAlertAsync(
                     type,
-                    "START",
                     $"Incident STARTED at {now:u}. Initial count: {currentCount}.",
-                    hostname
+                    hostname,
+                    "START"
                 );
 
 
@@ -291,9 +300,9 @@ namespace LightShield.Api.Services
 
                 await alertWriter.CreateAndSendAlertAsync(
                     type,
-                    "REOPEN",
                     $"Incident REOPENED at {now:u}.",
-                    hostname
+                    hostname,
+                    "REOPEN"
                 );
 
                 _logger.LogWarning(
@@ -342,10 +351,12 @@ namespace LightShield.Api.Services
 
                 await alertWriter.CreateAndSendAlertAsync(
                     incident.Type,
-                    "END",
                     $"Incident ended. Total events: {incident.Count}. " +
                     $"Duration: {(incident.LastEventTime - incident.StartTime).TotalSeconds:F1}s",
-                    incident.Hostname
+                    incident.Hostname,
+                    "END"
+
+
                 );
 
                 _logger.LogInformation(

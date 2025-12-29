@@ -43,6 +43,7 @@ namespace LightShield.Api.Services
             {
                 _logger.LogWarning(
                     "Alert suppressed (duplicate {Phase} within 30s): {Type} on {Host}",
+                    phase,
                     type,
                     hostname
                 );
@@ -73,6 +74,7 @@ namespace LightShield.Api.Services
             string formattedMessage =
                 $"[LightShield Alert]\n" +
                 $"Type: {alert.Type}\n" +
+                $"Phase: {alert.Phase}\n" +
                 $"Host: {alert.Hostname}\n" +
                 $"When: {localTime} (local time)\n" +
                 $"Details: {alert.Message}";
@@ -99,8 +101,9 @@ namespace LightShield.Api.Services
                 await _alertService.SendAlertAsync(email, phone, formattedMessage);
 
                 _logger.LogInformation(
-                    "Alert created + notification delivered. Type={Type}, Host={Host}",
+                    "Alert created + notification delivered. Type={Type}, Phase={Phase}, Host={Host}",
                     alert.Type,
+                    alert.Phase,
                     alert.Hostname
                 );
             }
