@@ -296,12 +296,16 @@ namespace LightShield.Api.Services
         {
             var now = DateTime.UtcNow;
 
-            var staleIncidents = await db.IncidentStates
+            var candidates = await db.IncidentStates
                 .Where(i =>
                     i.IsActive &&
-                    i.Type == incidentType &&
-                    now - i.LastEventTime > quietTime)
+                    i.Type == incidentType)
                 .ToListAsync(token);
+
+            var staleIncidents = candidates
+                .Where(i => now - i.LastEventTime > quietTime)
+                .ToList();
+
 
 
             foreach (var incident in staleIncidents)
