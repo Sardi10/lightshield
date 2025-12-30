@@ -11,5 +11,6 @@ namespace LightShield.Api.Models
         public string Message { get; set; } = string.Empty; // alert text
         public string Channel { get; set; } = string.Empty; // e.g. "SMS" or "Email"
         public string Hostname { get; set; } = string.Empty;
+        public string Phase { get; set; } =string.Empty; // START | END | REOPEN
     }
 }

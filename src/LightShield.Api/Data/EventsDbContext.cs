@@ -14,6 +14,7 @@ namespace LightShield.Api.Data
         public DbSet<Alert> Alerts { get; set; }
         public DbSet<UserConfiguration> Configurations { get; set; } = null!;
         public DbSet<UserConfiguration> UserConfiguration { get; set; }
+        public DbSet<IncidentState> IncidentStates { get; set; }
 
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -38,6 +39,10 @@ namespace LightShield.Api.Data
                     v => v.ToUniversalTime().ToString("o"),
                     v => DateTime.Parse(v).ToUniversalTime()
                 );
+
+            modelBuilder.Entity<IncidentState>()
+           .HasIndex(i => new { i.Type, i.Hostname })
+           .IsUnique();
         }
     }
 }

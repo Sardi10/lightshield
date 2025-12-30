@@ -295,7 +295,7 @@ namespace LightShield.Api.Controllers
             _db.Anomalies.Add(anomaly);
             await _db.SaveChangesAsync();
 
-            await _alertWriter.CreateAndSendAlertAsync(type, description, hostname);
+            await _alertWriter.CreateAndSendAlertAsync(type, description, hostname, "START");
         }
 
         // ======================================================================
@@ -341,7 +341,8 @@ namespace LightShield.Api.Controllers
                 await _alertWriter.CreateAndSendAlertAsync(
                     "LoginFailureBurst",
                     burst.Description,
-                    evt.Hostname);
+                    evt.Hostname,
+                    "START");
             }
 
             await _db.SaveChangesAsync();
