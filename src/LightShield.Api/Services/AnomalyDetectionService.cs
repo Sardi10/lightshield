@@ -176,7 +176,7 @@ namespace LightShield.Api.Services
                 }
 
                 // ============================
-                // FILE MODIFY BURST
+                // FILE MODIFY BURST.
                 // ============================
                 if (modifies >= MODIFY_THRESHOLD)
                 {
