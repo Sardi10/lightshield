@@ -73,12 +73,25 @@ namespace LightShield.Api.Services
 
                 if (count >= FAILED_LOGIN_THRESHOLD)
                 {
+                    var newestEventTime = group.Max(e => e.Timestamp);
+
+                    var incident = await db.IncidentStates
+                        .FirstOrDefaultAsync(i =>
+                            i.Type == "FailedLoginBurst" &&
+                            i.Hostname == group.Key,
+                            stoppingToken);
+
+                    
+                    if (incident != null && newestEventTime <= incident.LastEventTime)
+                        continue;
+
                     await HandleIncidentAsync(
                         db,
                         alertWriter,
                         group.Key,
                         "FailedLoginBurst",
                         count,
+                        newestEventTime,
                         quietTime,
                         stoppingToken
                     );
@@ -123,7 +136,7 @@ namespace LightShield.Api.Services
             const int DELETE_THRESHOLD = 20;
             const int RENAME_THRESHOLD = 10;
 
-            var quietTime = TimeSpan.FromSeconds(15);
+            var quietTime = TimeSpan.FromSeconds(120);
 
             foreach (var group in groupedByHost)
             {
@@ -137,15 +150,26 @@ namespace LightShield.Api.Services
                 // ============================
                 // FILE DELETE BURST
                 // ============================
-                if (deletes >= DELETE_THRESHOLD &&
-                    !await IsIncidentActiveAsync(db, "FileDeleteBurst", hostname, stoppingToken))
+                if (deletes >= DELETE_THRESHOLD)
                 {
+                    var newestEventTime = group.Max(e => e.Timestamp);
+
+                    var incident = await db.IncidentStates
+                        .FirstOrDefaultAsync(i =>
+                            i.Type == "FileDeleteBurst" &&
+                            i.Hostname == hostname,
+                            stoppingToken);
+
+                    if (incident != null && newestEventTime <= incident.LastEventTime)
+                        continue;
+
                     await HandleIncidentAsync(
                         db,
                         alertWriter,
                         hostname,
                         "FileDeleteBurst",
                         deletes,
+                        newestEventTime,
                         quietTime,
                         stoppingToken
                     );
@@ -154,15 +178,26 @@ namespace LightShield.Api.Services
                 // ============================
                 // FILE MODIFY BURST
                 // ============================
-                if (modifies >= MODIFY_THRESHOLD &&
-                    !await IsIncidentActiveAsync(db, "FileModifyBurst", hostname, stoppingToken))
+                if (modifies >= MODIFY_THRESHOLD)
                 {
+                    var newestEventTime = group.Max(e => e.Timestamp);
+
+                    var incident = await db.IncidentStates
+                        .FirstOrDefaultAsync(i =>
+                            i.Type == "FileModifyBurst" &&
+                            i.Hostname == hostname,
+                            stoppingToken);
+
+                    if (incident != null && newestEventTime <= incident.LastEventTime)
+                        continue;
+
                     await HandleIncidentAsync(
                         db,
                         alertWriter,
                         hostname,
                         "FileModifyBurst",
                         modifies,
+                        newestEventTime,
                         quietTime,
                         stoppingToken
                     );
@@ -171,50 +206,86 @@ namespace LightShield.Api.Services
                 // ============================
                 // FILE CREATE BURST
                 // ============================
-                if (creates >= CREATE_THRESHOLD &&
-                    !await IsIncidentActiveAsync(db, "FileCreateBurst", hostname, stoppingToken))
+                if (creates >= CREATE_THRESHOLD)
                 {
+                    var newestEventTime = group.Max(e => e.Timestamp);
+
+                    var incident = await db.IncidentStates
+                        .FirstOrDefaultAsync(i =>
+                            i.Type == "FileCreateBurst" &&
+                            i.Hostname == hostname,
+                            stoppingToken);
+
+                    if (incident != null && newestEventTime <= incident.LastEventTime)
+                        continue;
+
                     await HandleIncidentAsync(
                         db,
                         alertWriter,
                         hostname,
                         "FileCreateBurst",
                         creates,
+                        newestEventTime,
                         quietTime,
                         stoppingToken
                     );
+
                 }
 
                 // ============================
                 // FILE RENAME BURST
                 // ============================
-                if (renames >= RENAME_THRESHOLD &&
-                    !await IsIncidentActiveAsync(db, "FileRenameBurst", hostname, stoppingToken))
+                if (renames >= RENAME_THRESHOLD)
                 {
+                    var newestEventTime = group.Max(e => e.Timestamp);
+
+
+                    var incident = await db.IncidentStates
+                        .FirstOrDefaultAsync(i =>
+                            i.Type == "FileRenameBurst" &&
+                            i.Hostname == hostname,
+                            stoppingToken);
+
+                    if (incident != null && newestEventTime <= incident.LastEventTime)
+                        continue;
+
                     await HandleIncidentAsync(
                         db,
                         alertWriter,
                         hostname,
                         "FileRenameBurst",
                         renames,
+                        newestEventTime,
                         quietTime,
                         stoppingToken
                     );
+
                 }
 
                 // ============================
                 // RANSOMWARE / ENCRYPTION BURST
                 // ============================
                 if (modifies >= MODIFY_THRESHOLD / 2 &&
-                    renames >= RENAME_THRESHOLD / 2 &&
-                    !await IsIncidentActiveAsync(db, "FileEncryptionBurst", hostname, stoppingToken))
+                    renames >= RENAME_THRESHOLD / 2)
                 {
+                    var newestEventTime = group.Max(e => e.Timestamp);
+
+                    var incident = await db.IncidentStates
+                        .FirstOrDefaultAsync(i =>
+                            i.Type == "FileEncryptionBurst" &&
+                            i.Hostname == hostname,
+                            stoppingToken);
+
+                    if (incident != null && newestEventTime <= incident.LastEventTime)
+                        continue;
+
                     await HandleIncidentAsync(
                         db,
                         alertWriter,
                         hostname,
                         "FileEncryptionBurst",
                         modifies + renames,
+                        newestEventTime,
                         quietTime,
                         stoppingToken
                     );
@@ -240,33 +311,51 @@ namespace LightShield.Api.Services
             string hostname,
             string type,
             int currentCount,
+            DateTime newestEventTime,
             TimeSpan quietTime,
             CancellationToken token)
         {
             var now = DateTime.UtcNow;
 
             var incident = await db.IncidentStates
-                .Where(i => i.Type == type && i.Hostname == hostname)
-                .OrderByDescending(i => i.IsActive)
-                .FirstOrDefaultAsync(token);
+                .FirstOrDefaultAsync(i =>
+                    i.Type == type &&
+                    i.Hostname == hostname,
+                    token);
+
+
+
+
 
 
             // ============================
             // OPEN INCIDENT
             // ============================
-            if (incident == null)
-            {
-                incident = new IncidentState
-                {
-                    Type = type,
-                    Hostname = hostname,
-                    StartTime = now,
-                    LastEventTime = now,
-                    Count = currentCount,
-                    IsActive = true
-                };
+            bool isNewIncident =
+                incident == null ||
+                (newestEventTime - incident.LastEventTime) > quietTime;
 
-                db.IncidentStates.Add(incident);
+
+
+            if (isNewIncident)
+            {
+                if (incident == null)
+                {
+                    // First-ever incident for this host/type
+                    incident = new IncidentState
+                    {
+                        Type = type,
+                        Hostname = hostname
+                    };
+
+                    db.IncidentStates.Add(incident);
+                }
+
+                // RESET incident state
+                incident.StartTime = newestEventTime;
+                incident.LastEventTime = newestEventTime;
+                incident.Count = currentCount;
+                incident.IsActive = true;
 
                 db.Anomalies.Add(new Anomaly
                 {
@@ -285,44 +374,8 @@ namespace LightShield.Api.Services
                     "START"
                 );
 
-
                 return;
             }
-
-            if (!incident.IsActive)
-            {
-                incident.IsActive = true;
-                incident.StartTime = now;
-                incident.LastEventTime = now;
-                incident.Count = currentCount;
-
-                await db.SaveChangesAsync(token);
-
-                await alertWriter.CreateAndSendAlertAsync(
-                    type,
-                    $"Incident REOPENED at {now:u}.",
-                    hostname,
-                    "REOPEN"
-                );
-
-                _logger.LogWarning(
-                   "Incident OPENED: {Type} on {Host} ({Count} events)",
-                   type, hostname, currentCount
-               );
-
-                return;
-            }
-
-            
-
-            // ============================
-            // UPDATE INCIDENT
-            // ============================
-            incident.LastEventTime = now;
-            incident.Count = Math.Max(incident.Count, currentCount);
-
-
-            await db.SaveChangesAsync(token);
         }
 
         private async Task CloseStaleIncidentsAsync(
