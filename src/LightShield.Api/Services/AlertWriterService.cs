@@ -33,14 +33,18 @@ namespace LightShield.Api.Services
             // ----------------------------------------------------
             // 0) ANTI-SPAM DUPLICATE SUPPRESSION (HARD SAFETY NET)
             // ----------------------------------------------------
-            var recent = await _db.Alerts.AnyAsync(a =>
-                a.Type == type &&
-                a.Hostname == hostname &&
-                a.Phase == phase &&
-                a.Timestamp > DateTime.UtcNow.AddSeconds(-30));
-
-            if (recent)
+            // Suppress duplicates ONLY for REOPEN and END
+            if (phase != "START")
             {
+                var recent = await _db.Alerts.AnyAsync(a =>
+                    a.Type == type &&
+                    a.Hostname == hostname &&
+                    a.Phase == phase &&
+                    a.Timestamp > DateTime.UtcNow.AddSeconds(-30));
+
+            
+                if (recent)
+                {
                 _logger.LogWarning(
                     "Alert suppressed (duplicate {Phase} within 30s): {Type} on {Host}",
                     phase,
@@ -48,8 +52,8 @@ namespace LightShield.Api.Services
                     hostname
                 );
                 return;
+                }
             }
-
             // --------------------------------------------
             // 1) Save alert to DB
             // --------------------------------------------

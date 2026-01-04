@@ -79,8 +79,8 @@ namespace LightShield.Api.Controllers
                 evt.Timestamp, evt.Source, evt.Type, evt.PathOrMessage, evt.Hostname
             );
 
-            await CheckImmediateThresholdsAsync(evt, evt.Type, HttpContext.RequestAborted);
-            await DetectLoginFailureAnomalies(evt);
+            //await CheckImmediateThresholdsAsync(evt, evt.Type, HttpContext.RequestAborted);
+            //await DetectLoginFailureAnomalies(evt);
 
             return Accepted();
         }
@@ -227,125 +227,125 @@ namespace LightShield.Api.Controllers
         // ======================================================================
         // Threshold Alerts → Create Anomaly → Create Alert (UNIFIED)
         // ======================================================================
-        private async Task CheckImmediateThresholdsAsync(
-            Event evt, string type, CancellationToken ct)
-        {
-            if (type is not ("failedlogin" or "filecreate" or "filemodify" or "filedelete"))
-                return;
+        //private async Task CheckImmediateThresholdsAsync(
+        //    Event evt, string type, CancellationToken ct)
+        //{
+        //    if (type is not ("failedlogin" or "filecreate" or "filemodify" or "filedelete"))
+        //        return;
 
-            var since = evt.Timestamp.AddMinutes(-5);
+        //    var since = evt.Timestamp.AddMinutes(-5);
 
-            int failedLoginCount = await _db.Events
-                .Where(e => e.Type == "failedlogin"
-                         && e.Hostname == evt.Hostname
-                         && e.Timestamp >= since)
-                .CountAsync(ct);
+        //    int failedLoginCount = await _db.Events
+        //        .Where(e => e.Type == "failedlogin"
+        //                 && e.Hostname == evt.Hostname
+        //                 && e.Timestamp >= since)
+        //        .CountAsync(ct);
 
-            int fileCreateCount = await _db.Events
-                .Where(e => e.Type == "filecreate"
-                         && e.Hostname == evt.Hostname
-                         && e.Timestamp >= since)
-                .CountAsync(ct);
+        //    int fileCreateCount = await _db.Events
+        //        .Where(e => e.Type == "filecreate"
+        //                 && e.Hostname == evt.Hostname
+        //                 && e.Timestamp >= since)
+        //        .CountAsync(ct);
 
-            int fileModifyCount = await _db.Events
-                .Where(e => e.Type == "filemodify"
-                         && e.Hostname == evt.Hostname
-                         && e.Timestamp >= since)
-                .CountAsync(ct);
+        //    int fileModifyCount = await _db.Events
+        //        .Where(e => e.Type == "filemodify"
+        //                 && e.Hostname == evt.Hostname
+        //                 && e.Timestamp >= since)
+        //        .CountAsync(ct);
 
-            int fileDeleteCount = await _db.Events
-                .Where(e => e.Type == "filedelete"
-                         && e.Hostname == evt.Hostname
-                         && e.Timestamp >= since)
-                .CountAsync(ct);
+        //    int fileDeleteCount = await _db.Events
+        //        .Where(e => e.Type == "filedelete"
+        //                 && e.Hostname == evt.Hostname
+        //                 && e.Timestamp >= since)
+        //        .CountAsync(ct);
 
-            var modifyThreshold = await _configService.GetFileEditThresholdAsync();
-            var deleteThreshold = await _configService.GetFileDeleteThresholdAsync();
-            var createThreshold = await _configService.GetFileCreateThresholdAsync();
-            var loginThreshold = await _configService.GetFailedLoginThresholdAsync();
+        //    var modifyThreshold = await _configService.GetFileEditThresholdAsync();
+        //    var deleteThreshold = await _configService.GetFileDeleteThresholdAsync();
+        //    var createThreshold = await _configService.GetFileCreateThresholdAsync();
+        //    var loginThreshold = await _configService.GetFailedLoginThresholdAsync();
 
-            if (fileModifyCount >= modifyThreshold)
-                await CreateBurstAnomalyAndAlert(evt.Hostname, "FileModifyBurst",
-                    $"{fileModifyCount} file modifications in last 5 minutes (≥{modifyThreshold})");
+        //    if (fileModifyCount >= modifyThreshold)
+        //        await CreateBurstAnomalyAndAlert(evt.Hostname, "FileModifyBurst",
+        //            $"{fileModifyCount} file modifications in last 5 minutes (≥{modifyThreshold})");
 
-            if (fileDeleteCount >= deleteThreshold)
-                await CreateBurstAnomalyAndAlert(evt.Hostname, "FileDeleteBurst",
-                    $"{fileDeleteCount} file deletions in last 5 minutes (≥{deleteThreshold})");
+        //    if (fileDeleteCount >= deleteThreshold)
+        //        await CreateBurstAnomalyAndAlert(evt.Hostname, "FileDeleteBurst",
+        //            $"{fileDeleteCount} file deletions in last 5 minutes (≥{deleteThreshold})");
 
-            if (fileCreateCount >= createThreshold)
-                await CreateBurstAnomalyAndAlert(evt.Hostname, "FileCreateBurst",
-                    $"{fileCreateCount} file creations in last 5 minutes (≥{createThreshold})");
+        //    if (fileCreateCount >= createThreshold)
+        //        await CreateBurstAnomalyAndAlert(evt.Hostname, "FileCreateBurst",
+        //            $"{fileCreateCount} file creations in last 5 minutes (≥{createThreshold})");
 
-            if (failedLoginCount >= loginThreshold)
-                await CreateBurstAnomalyAndAlert(evt.Hostname, "FailedLoginBurst",
-                    $"{failedLoginCount} failed logins in last 5 minutes (≥{loginThreshold})");
-        }
+        //    if (failedLoginCount >= loginThreshold)
+        //        await CreateBurstAnomalyAndAlert(evt.Hostname, "FailedLoginBurst",
+        //            $"{failedLoginCount} failed logins in last 5 minutes (≥{loginThreshold})");
+        //}
 
-        private async Task CreateBurstAnomalyAndAlert(
-            string hostname, string type, string description)
-        {
-            var anomaly = new Anomaly
-            {
-                Type = type,
-                Description = description,
-                Hostname = hostname,
-                Timestamp = DateTime.UtcNow
-            };
+        //private async Task CreateBurstAnomalyAndAlert(
+        //    string hostname, string type, string description)
+        //{
+        //    await _alertWriter.CreateAndSendAlertAsync(
+        //        type,
+        //        description,
+        //        hostname,
+        //        "START"
+        //    );
+        //    await _alertWriter.CreateAndSendAlertAsync(type, description, hostname, "START");
+        //}
 
-            _db.Anomalies.Add(anomaly);
-            await _db.SaveChangesAsync();
 
-            await _alertWriter.CreateAndSendAlertAsync(type, description, hostname, "START");
-        }
+
+        
+        
 
         // ======================================================================
         // LOGIN FAILURE ANOMALIES (simple + burst)
         // ======================================================================
-        private async Task DetectLoginFailureAnomalies(Event evt)
-        {
-            if (evt.Type != "loginfailure")
-                return;
+        //private async Task DetectLoginFailureAnomalies(Event evt)
+        //{
+        //    if (evt.Type != "loginfailure")
+        //        return;
 
-            // simple anomaly
-            var simple = new Anomaly
-            {
-                Timestamp = evt.Timestamp,
-                Type = "LoginFailure",
-                Description = $"Login failed on {evt.Hostname}.",
-                Hostname = evt.Hostname
-            };
-            _db.Anomalies.Add(simple);
+        //    // simple anomaly
+        //    var simple = new Anomaly
+        //    {
+        //        Timestamp = evt.Timestamp,
+        //        Type = "LoginFailure",
+        //        Description = $"Login failed on {evt.Hostname}.",
+        //        Hostname = evt.Hostname
+        //    };
+        //    _db.Anomalies.Add(simple);
 
-            var now = evt.Timestamp;
-            var windowStart = now.AddSeconds(-30);
+        //    var now = evt.Timestamp;
+        //    var windowStart = now.AddSeconds(-30);
 
-            int failures = await _db.Events
-                .Where(e => e.Type == "loginfailure"
-                         && e.Timestamp >= windowStart
-                         && e.Timestamp <= now)
-                .CountAsync();
+        //    int failures = await _db.Events
+        //        .Where(e => e.Type == "loginfailure"
+        //                 && e.Timestamp >= windowStart
+        //                 && e.Timestamp <= now)
+        //        .CountAsync();
 
-            if (failures >= 5)
-            {
-                var burst = new Anomaly
-                {
-                    Timestamp = now,
-                    Type = "LoginFailureBurst",
-                    Description = $"{failures} failed logins in last 30 seconds.",
-                    Hostname = evt.Hostname
-                };
+        //    if (failures >= 5)
+        //    {
+        //        var burst = new Anomaly
+        //        {
+        //            Timestamp = now,
+        //            Type = "LoginFailureBurst",
+        //            Description = $"{failures} failed logins in last 30 seconds.",
+        //            Hostname = evt.Hostname
+        //        };
 
-                _db.Anomalies.Add(burst);
+        //        _db.Anomalies.Add(burst);
 
-                // New: Unified alert pipeline
-                await _alertWriter.CreateAndSendAlertAsync(
-                    "LoginFailureBurst",
-                    burst.Description,
-                    evt.Hostname,
-                    "START");
-            }
+        //        // New: Unified alert pipeline
+        //        await _alertWriter.CreateAndSendAlertAsync(
+        //            "LoginFailureBurst",
+        //            burst.Description,
+        //            evt.Hostname,
+        //            "START");
+        //    }
 
-            await _db.SaveChangesAsync();
-        }
+        //    await _db.SaveChangesAsync();
+        //}
     }
 }
