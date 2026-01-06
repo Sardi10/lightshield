@@ -169,13 +169,13 @@ namespace LightShield.Api.Services
         // START / CONTINUE
         // =============================================================
         private async Task HandleIncidentAsync(
-    EventsDbContext db,
-    AlertWriterService alertWriter,
-    string hostname,
-    string type,
-    int currentCount,
-    DateTime newestEventTime,
-    CancellationToken token)
+            EventsDbContext db,
+            AlertWriterService alertWriter,
+            string hostname,
+            string type,
+            int currentCount,
+            DateTime newestEventTime,
+            CancellationToken token)
         {
             var incident = await db.IncidentStates
                 .FirstOrDefaultAsync(i => i.Type == type && i.Hostname == hostname, token);
