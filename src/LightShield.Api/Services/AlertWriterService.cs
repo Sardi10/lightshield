@@ -1,10 +1,10 @@
 using System;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Microsoft.EntityFrameworkCore;
 using LightShield.Api.Data;
 using LightShield.Api.Models;
 using LightShield.Api.Services.Alerts;
-using Microsoft.EntityFrameworkCore;
 
 
 namespace LightShield.Api.Services
@@ -21,6 +21,7 @@ namespace LightShield.Api.Services
             IAlertService alertService,
             ConfigurationService config,
             ILogger<AlertWriterService> logger)
+
         {
             _db = db;
             _alertService = alertService;
@@ -28,35 +29,37 @@ namespace LightShield.Api.Services
             _logger = logger;
         }
 
-        public async Task CreateAndSendAlertAsync(string type, string description, string hostname, string phase)
+        public async Task CreateAndSendAlertAsync(
+            string type,
+            string description,
+            string hostname,
+            string phase)
         {
             // ----------------------------------------------------
-            // 0) ANTI-SPAM DUPLICATE SUPPRESSION (HARD SAFETY NET)
+            // Deduplicate START only
             // ----------------------------------------------------
-            // Suppress duplicates ONLY for REOPEN and END
-            if (phase != "START")
+            if (phase == "START")
             {
-                var recent = await _db.Alerts.AnyAsync(a =>
+                var recentStart = await _db.Alerts.AnyAsync(a =>
                     a.Type == type &&
                     a.Hostname == hostname &&
-                    a.Phase == phase &&
+                    a.Phase == "START" &&
                     a.Timestamp > DateTime.UtcNow.AddSeconds(-30));
 
-            
-                if (recent)
+                if (recentStart)
                 {
-                _logger.LogWarning(
-                    "Alert suppressed (duplicate {Phase} within 30s): {Type} on {Host}",
-                    phase,
-                    type,
-                    hostname
-                );
-                return;
+                    _logger.LogWarning(
+                        "Alert suppressed (duplicate START within 30s): {Type} on {Host}",
+                        type,
+                        hostname
+                    );
+                    return;
                 }
             }
-            // --------------------------------------------
-            // 1) Save alert to DB
-            // --------------------------------------------
+
+            // ----------------------------------------------------
+            // Save alert to DB
+            // ----------------------------------------------------
             var alert = new Alert
             {
                 Timestamp = DateTime.UtcNow,
@@ -70,9 +73,16 @@ namespace LightShield.Api.Services
             _db.Alerts.Add(alert);
             await _db.SaveChangesAsync();
 
-            // --------------------------------------------
-            // 2) Format message for SMS + email
-            // --------------------------------------------
+            _logger.LogInformation(
+                "Alert saved. Type={Type}, Phase={Phase}, Host={Host}",
+                alert.Type,
+                alert.Phase,
+                alert.Hostname
+            );
+
+            // ----------------------------------------------------
+            // Build message
+            // ----------------------------------------------------
             string localTime = alert.Timestamp.ToLocalTime().ToString("f");
 
             string formattedMessage =
@@ -80,32 +90,31 @@ namespace LightShield.Api.Services
                 $"Type: {alert.Type}\n" +
                 $"Phase: {alert.Phase}\n" +
                 $"Host: {alert.Hostname}\n" +
-                $"When: {localTime} (local time)\n" +
+                $"When: {localTime}\n" +
                 $"Details: {alert.Message}";
 
-            // --------------------------------------------
-            // 3) Retrieve dynamic user configuration
-            // --------------------------------------------
+            // ----------------------------------------------------
+            // Delivery config
+            // ----------------------------------------------------
             string? email = await _config.GetEmailAsync();
             string? phone = await _config.GetPhoneAsync();
 
-            if (string.IsNullOrWhiteSpace(email) && string.IsNullOrWhiteSpace(phone))
+            if (string.IsNullOrWhiteSpace(email) &&
+                string.IsNullOrWhiteSpace(phone))
             {
-                _logger.LogWarning(
-                    "Alert generated but no delivery channels configured. User email/phone not set."
-                );
+                _logger.LogWarning("Alert generated but no delivery channels configured.");
                 return;
             }
 
-            // --------------------------------------------
-            // 4) Deliver alert through CompositeAlertService
-            // --------------------------------------------
+            // ----------------------------------------------------
+            // Send notification
+            // ----------------------------------------------------
             try
             {
                 await _alertService.SendAlertAsync(email, phone, formattedMessage);
 
                 _logger.LogInformation(
-                    "Alert created + notification delivered. Type={Type}, Phase={Phase}, Host={Host}",
+                    "Alert delivered. Type={Type}, Phase={Phase}, Host={Host}",
                     alert.Type,
                     alert.Phase,
                     alert.Hostname
@@ -115,7 +124,7 @@ namespace LightShield.Api.Services
             {
                 _logger.LogError(
                     ex,
-                    "Alert was saved to DB but FAILED to deliver via email/SMS."
+                    "Alert saved but failed to deliver."
                 );
             }
         }
