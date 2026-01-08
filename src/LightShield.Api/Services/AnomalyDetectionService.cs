@@ -33,6 +33,13 @@ namespace LightShield.Api.Services
             {
                 try
                 {
+                    using var scope = _services.CreateScope();
+
+                    var baselineService =
+                        scope.ServiceProvider.GetRequiredService<FileBaselineService>();
+      
+                    await baselineService.UpdateBaselinesAsync(stoppingToken);
+
                     await DetectFailedLoginBursts(stoppingToken);
                     await DetectFileTamperBursts(stoppingToken);
                 }
@@ -43,6 +50,7 @@ namespace LightShield.Api.Services
 
                 await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
             }
+
 
             _logger.LogInformation("AnomalyDetectionService stopped.");
         }
