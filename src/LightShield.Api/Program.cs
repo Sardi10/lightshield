@@ -72,6 +72,8 @@ builder.Services.AddHostedService<AnomalyDetectionService>();
 // Configuration management
 builder.Services.AddScoped<ConfigurationService>();
 
+builder.Services.AddScoped<FileBaselineService>();
+
 builder.Services.AddControllers().AddJsonOptions(options =>
 {
     options.JsonSerializerOptions.PropertyNamingPolicy = null;

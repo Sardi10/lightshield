@@ -11,6 +11,7 @@ namespace LightShield.Api.Models
         public DateTime LastEventTime { get; set; }
         public int Count { get; set; }
         public bool IsActive { get; set; }
+        public DateTime? CooldownUntil { get; set; }
     }
 
 }
