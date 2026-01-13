@@ -152,6 +152,35 @@ namespace LightShield.Api.Services
                 if (baseline == null)
                     continue;
 
+                // Require baseline to exist for at least 2 hours before detection
+                if (baseline.LastUpdated > DateTime.UtcNow.AddHours(-2))
+                {
+                    _logger.LogInformation(
+                        "Baseline still warming up for host={Host}, skipping detection",
+                        hostname);
+                    continue;
+                }
+
+                // =============================================================
+                // COOLDOWN CHECK (AVOID ALERT STORMS)
+                // =============================================================
+                var activeFileIncident = await db.IncidentStates
+                    .FirstOrDefaultAsync(i =>
+                        i.Hostname == hostname &&
+                        i.IsActive &&
+                        i.Type.StartsWith("File"),
+                        token);
+
+                if (activeFileIncident?.CooldownUntil != null &&
+                    DateTime.UtcNow < activeFileIncident.CooldownUntil)
+                {
+                    _logger.LogInformation(
+                        "File incident cooldown active for host={Host}, skipping detection",
+                        hostname);
+                    continue;
+                }
+
+
                 int creates = group.Count(e => e.Type == "filecreate");
                 int modifies = group.Count(e => e.Type == "filemodify");
                 int deletes = group.Count(e => e.Type == "filedelete");
@@ -241,6 +270,16 @@ namespace LightShield.Api.Services
             var incident = await db.IncidentStates
                 .FirstOrDefaultAsync(i => i.Type == type && i.Hostname == hostname, token);
 
+
+            // Avoid triggering incidents on tiny, one-off spikes
+            const int MIN_EVENTS_FOR_START = 5;
+
+            if (incident == null && currentCount < MIN_EVENTS_FOR_START)
+            {
+                return;
+            }
+
+
             // =============================================================
             // START NEW OR RESTART CLOSED INCIDENT
             // =============================================================
@@ -307,6 +346,9 @@ namespace LightShield.Api.Services
                 incident.Type, incident.Hostname);
 
             incident.IsActive = false;
+
+            // Set cooldown to prevent immediate re-triggering
+            incident.CooldownUntil = DateTime.UtcNow.AddMinutes(10);
 
             db.Anomalies.Add(new Anomaly
             {
