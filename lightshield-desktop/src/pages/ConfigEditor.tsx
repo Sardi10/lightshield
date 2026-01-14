@@ -28,8 +28,14 @@ export default function ConfigEditor() {
             try {
                 const res = await fetch("http://localhost:5213/api/configuration");
                 if (!res.ok) throw new Error(`GET /api/configuration -> ${res.status}`);
-                const data: Config = await res.json();
-                setCfg(data);
+                const data = await res.json();
+
+                setCfg({
+                    ...data,
+                    email: data.Email ?? data.email,
+                    phoneNumber: data.PhoneNumber ?? data.phoneNumber,
+                });
+
             } catch (e: unknown) {
                 setError(e instanceof Error ? e.message : "Failed to load configuration");
             } finally {
@@ -38,15 +44,13 @@ export default function ConfigEditor() {
         })();
     }, []);
 
-    const setNum = (k: keyof Config) => (e: React.ChangeEvent<HTMLInputElement>) =>
-        cfg && setCfg({ ...cfg, [k]: Math.max(0, Number(e.target.value || 0)) });
-
     const setStr = (k: keyof Config) => (e: React.ChangeEvent<HTMLInputElement>) =>
         cfg && setCfg({ ...cfg, [k]: e.target.value });
 
     const save = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!cfg) return;
+
         setError(null);
         setOk(null);
 
@@ -55,12 +59,20 @@ export default function ConfigEditor() {
 
         setSaving(true);
         try {
+            // ✅ Explicit payload: ONLY fields we want to submit
+            const payload = {
+                email: cfg.email,
+                phoneNumber: cfg.phoneNumber,
+            };
+
             const res = await fetch("http://localhost:5213/api/configuration", {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(cfg),
+                body: JSON.stringify(payload),
             });
+
             if (!res.ok) throw new Error(await res.text());
+
             const updated: Config = await res.json();
             setCfg(updated);
             setOk("Configuration saved successfully");
@@ -113,37 +125,26 @@ export default function ConfigEditor() {
                         </div>
                     )}
 
+                    {/* Alert Thresholds (Read-Only) */}
                     <section>
                         <h2 className="text-lg font-semibold mb-4 text-blue-700">
-                            Alert Thresholds
+                            Alert Thresholds (System-Controlled)
                         </h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <Num
-                                label="Max Failed Logins"
-                                value={cfg.maxFailedLogins}
-                                onChange={setNum("maxFailedLogins")}
-                            />
-                            <Num
-                                label="Max File Deletes"
-                                value={cfg.maxFileDeletes}
-                                onChange={setNum("maxFileDeletes")}
-                            />
-                            <Num
-                                label="Max File Creates"
-                                value={cfg.maxFileCreates}
-                                onChange={setNum("maxFileCreates")}
-                            />
-                            <Num
-                                label="Max File Modifies"
-                                value={cfg.maxFileModifies}
-                                onChange={setNum("maxFileModifies")}
-                            />
+                            <Num label="Max Failed Logins" value={cfg.maxFailedLogins} disabled />
+                            <Num label="Max File Deletes" value={cfg.maxFileDeletes} disabled />
+                            <Num label="Max File Creates" value={cfg.maxFileCreates} disabled />
+                            <Num label="Max File Modifies" value={cfg.maxFileModifies} disabled />
                         </div>
+                        <p className="text-sm text-gray-500 mt-3">
+                            These values are managed automatically by LightShield.
+                        </p>
                     </section>
 
+                    {/* Contacts */}
                     <section>
                         <h2 className="text-lg font-semibold mb-4 text-blue-700">
-                            Contacts
+                            Alert Contacts
                         </h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <Text
@@ -182,24 +183,31 @@ export default function ConfigEditor() {
     );
 }
 
+/* ========================
+   Reusable Inputs
+   ======================== */
+
 function Num({
     label,
     value,
-    onChange,
+    disabled = false,
 }: {
     label: string;
     value: number;
-    onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    disabled?: boolean;
 }) {
     return (
         <label className="flex flex-col">
             <span className="text-sm font-medium text-gray-700">{label}</span>
             <input
-                className="mt-1 p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition"
+                className={`mt-1 p-2 border rounded-md transition
+                    ${disabled
+                        ? "bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed"
+                        : "border-gray-300 focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+                    }`}
                 type="number"
-                min={0}
                 value={value}
-                onChange={onChange}
+                disabled
             />
         </label>
     );
