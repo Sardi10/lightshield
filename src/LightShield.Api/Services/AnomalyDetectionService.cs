@@ -45,6 +45,11 @@ namespace LightShield.Api.Services
       
                     await baselineService.UpdateBaselinesAsync(stoppingToken);
 
+                    using var dbScope = _services.CreateScope();
+                    var db = dbScope.ServiceProvider.GetRequiredService<EventsDbContext>();
+
+                    await PruneOldEventsAsync(db, stoppingToken);
+
                     await DetectFailedLoginBursts(stoppingToken);
                     await DetectFileTamperBursts(stoppingToken);
                 }
@@ -467,6 +472,33 @@ namespace LightShield.Api.Services
 
             return (current - mean) / effectiveStd;
         }
+
+        // =============================================================
+        // EVENT RETENTION (SAFE LOG ROTATION)
+        // =============================================================
+        private async Task PruneOldEventsAsync(
+            EventsDbContext db,
+            CancellationToken token)
+        {
+            // Keep last 14 days of raw events
+            var cutoff = DateTime.UtcNow.AddDays(-14);
+
+            var oldEvents = await db.Events
+                .Where(e => e.Timestamp < cutoff)
+                .ToListAsync(token);
+
+            if (oldEvents.Count == 0)
+                return;
+
+            db.Events.RemoveRange(oldEvents);
+            await db.SaveChangesAsync(token);
+
+            _logger.LogInformation(
+                "Event retention cleanup: removed {Count} events older than {Cutoff}",
+                oldEvents.Count,
+                cutoff);
+        }
+
 
     }
 }
