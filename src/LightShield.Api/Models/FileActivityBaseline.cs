@@ -20,6 +20,8 @@ namespace LightShield.Api.Models
         public double DeleteStd { get; set; }
         public double RenameStd { get; set; }
 
+        public DateTime FirstSeen { get; set; } = DateTime.UtcNow;
+        public bool DetectionEnabled { get; set; } = false;
         public DateTime LastUpdated { get; set; }
     }
 }
