@@ -45,6 +45,11 @@ namespace LightShield.Api.Services
       
                     await baselineService.UpdateBaselinesAsync(stoppingToken);
 
+                    using var dbScope = _services.CreateScope();
+                    var db = dbScope.ServiceProvider.GetRequiredService<EventsDbContext>();
+
+                    await PruneOldEventsAsync(db, stoppingToken);
+
                     await DetectFailedLoginBursts(stoppingToken);
                     await DetectFileTamperBursts(stoppingToken);
                 }
@@ -152,14 +157,42 @@ namespace LightShield.Api.Services
                 if (baseline == null)
                     continue;
 
-                // Require baseline to exist for at least 2 hours before detection
-                if (baseline.LastUpdated > DateTime.UtcNow.AddHours(-2))
+                // -------------------------------------------------
+                // One-time stabilization check (DO NOT REMOVE)
+                // -------------------------------------------------
+                if (!baseline.DetectionEnabled)
+                {
+                    var hoursLearning =
+                        (DateTime.UtcNow - baseline.FirstSeen).TotalHours;
+
+                    bool hasVariance =
+                        baseline.CreateStd > 0.001 ||
+                        baseline.ModifyStd > 0.001 ||
+                        baseline.DeleteStd > 0.001 ||
+                        baseline.RenameStd > 0.001;
+
+                    if (hoursLearning >= 12 && hasVariance)
+                    {
+                        baseline.DetectionEnabled = true;
+                        await db.SaveChangesAsync(token);
+
+                        _logger.LogInformation(
+                            "Baseline stabilized for host={Host}. Detection ENABLED.",
+                            hostname);
+                    }
+                }
+
+                // Detection disabled until baseline is stable (time + variance)
+                if (!baseline.DetectionEnabled)
                 {
                     _logger.LogInformation(
-                        "Baseline still warming up for host={Host}, skipping detection",
-                        hostname);
+                        "Baseline learning in progress for host={Host} (elapsed {Hours:F1}h)",
+                        hostname,
+                        (DateTime.UtcNow - baseline.FirstSeen).TotalHours);
+
                     continue;
                 }
+
 
                 // =============================================================
                 // COOLDOWN CHECK (AVOID ALERT STORMS)
@@ -432,8 +465,40 @@ namespace LightShield.Api.Services
             if (std <= 0.000001)
                 return 0;
 
-            return (current - mean) / std;
+            // Soft statistical floor to prevent early-baseline explosions
+            const double MIN_EFFECTIVE_STD = 0.2;
+
+            double effectiveStd = Math.Max(std, MIN_EFFECTIVE_STD);
+
+            return (current - mean) / effectiveStd;
         }
+
+        // =============================================================
+        // EVENT RETENTION (SAFE LOG ROTATION)
+        // =============================================================
+        private async Task PruneOldEventsAsync(
+            EventsDbContext db,
+            CancellationToken token)
+        {
+            // Keep last 14 days of raw events
+            var cutoff = DateTime.UtcNow.AddDays(-14);
+
+            var oldEvents = await db.Events
+                .Where(e => e.Timestamp < cutoff)
+                .ToListAsync(token);
+
+            if (oldEvents.Count == 0)
+                return;
+
+            db.Events.RemoveRange(oldEvents);
+            await db.SaveChangesAsync(token);
+
+            _logger.LogInformation(
+                "Event retention cleanup: removed {Count} events older than {Cutoff}",
+                oldEvents.Count,
+                cutoff);
+        }
+
 
     }
 }

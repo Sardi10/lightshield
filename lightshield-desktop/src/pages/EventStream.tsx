@@ -93,20 +93,20 @@ export default function EventStream() {
 
         if (s === "critical")
             return (
-                <span className="px-2 py-1 bg-red-600 text-white text-xs font-bold rounded">
+                <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-600 text-white text-xs font-bold rounded whitespace-nowrap">
                     🔥 Critical
                 </span>
             );
 
         if (s === "warning")
             return (
-                <span className="px-2 py-1 bg-orange-500 text-white text-xs font-bold rounded">
+                <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-500 text-white text-xs font-bold rounded whitespace-nowrap">
                     ⚠ Warning
                 </span>
             );
 
         return (
-            <span className="px-2 py-1 bg-blue-600 text-white text-xs rounded font-bold">
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-600 text-white text-xs font-bold rounded whitespace-nowrap">
                 Info
             </span>
         );
@@ -120,21 +120,21 @@ export default function EventStream() {
 
         if (o === "windows")
             return (
-                <span className="px-2 py-1 bg-blue-700 text-white text-xs rounded">
+                <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-700 text-white text-xs rounded whitespace-nowrap">
                     🪟 Windows
                 </span>
             );
 
         if (o === "linux")
             return (
-                <span className="px-2 py-1 bg-yellow-600 text-white text-xs rounded">
+                <span className="inline-flex items-center gap-1 px-2 py-1 bg-yellow-600 text-white text-xs rounded whitespace-nowrap">
                     🐧 Linux
                 </span>
             );
 
         return (
-            <span className="px-2 py-1 bg-gray-500 text-white text-xs rounded">
-                Unknown
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-500 text-white text-xs rounded whitespace-nowrap">
+               ❓ Unknown
             </span>
         );
     };
@@ -287,8 +287,8 @@ export default function EventStream() {
                                 </td>
                                 <td className="px-4 py-2">{e.Hostname}</td>
                                 <td className="px-4 py-2">{e.Type}</td>
-                                <td className="px-4 py-2">{severityBadge(e.Severity)}</td>
-                                <td className="px-4 py-2">{osBadge(e.OperatingSystem)}</td>
+                                <td className="px-4 py-2 align-middle">{severityBadge(e.Severity)}</td>
+                                <td className="px-4 py-2 align-middle">{osBadge(e.OperatingSystem)}</td>
                                 <td className="px-4 py-2">{e.Username || "-"}</td>
                                 <td className="px-4 py-2">{e.IPAddress || "-"}</td>
                                 <td className="px-4 py-2">
