@@ -7,24 +7,22 @@ class Program
 {
     static void Main()
     {
-        Console.WriteLine("[Launcher] Starting LightShield ecosystem...");
+        Console.WriteLine("[Launcher] Starting LightShield background services...");
 
-        // Where the exe files will live (same folder as launcher)
-        string baseDir = AppContext.BaseDirectory;
+        string launcherDir = AppContext.BaseDirectory;
+        string rootDir = Path.GetFullPath(Path.Combine(launcherDir, ".."));
 
-        string apiPath = Path.Combine(baseDir, "LightShield.Api.exe");
-        string agentPath = Path.Combine(baseDir, "LightShield.Agent.exe");
-        string parserPath = Path.Combine(baseDir, "LightShield.LogParser.exe");
-        string desktopPath = Path.Combine(baseDir, "LightShield.Desktop.exe");
+        string apiPath = Path.Combine(rootDir, "api", "LightShield.Api.exe");
+        string agentPath = Path.Combine(rootDir, "agent", "LightShield.Agent.exe");
+        string parserPath = Path.Combine(rootDir, "logparser", "LightShield.LogParser.exe");
 
         StartProcess(apiPath, "API");
-        Thread.Sleep(1500); // give API time to start
+        Thread.Sleep(1500);
 
         StartProcess(agentPath, "Agent");
         StartProcess(parserPath, "LogParser");
-        StartProcess(desktopPath, "Desktop UI");
 
-        Console.WriteLine("[Launcher] All components started.");
+        Console.WriteLine("[Launcher] Background services started.");
     }
 
     static void StartProcess(string path, string name)
@@ -35,11 +33,11 @@ class Program
             return;
         }
 
-        ProcessStartInfo psi = new ProcessStartInfo
+        var psi = new ProcessStartInfo
         {
             FileName = path,
             WorkingDirectory = Path.GetDirectoryName(path),
-            UseShellExecute = true,
+            UseShellExecute = true
         };
 
         Process.Start(psi);
