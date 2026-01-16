@@ -9,6 +9,8 @@ type Config = {
     maxFileModifies: number;
     phoneNumber: string;
     email: string;
+    telegramBotToken: string;
+    telegramChatId: string;
     createdAt?: string;
     updatedAt?: string;
 };
@@ -23,6 +25,9 @@ export default function ConfigEditor() {
     const [error, setError] = useState<string | null>(null);
     const [ok, setOk] = useState<string | null>(null);
 
+    // ------------------------------------------------------------
+    // Load configuration
+    // ------------------------------------------------------------
     useEffect(() => {
         (async () => {
             try {
@@ -32,10 +37,11 @@ export default function ConfigEditor() {
 
                 setCfg({
                     ...data,
-                    email: data.Email ?? data.email,
-                    phoneNumber: data.PhoneNumber ?? data.phoneNumber,
+                    email: data.Email ?? data.email ?? "",
+                    phoneNumber: data.PhoneNumber ?? data.phoneNumber ?? "",
+                    telegramBotToken: data.TelegramBotToken ?? data.telegramBotToken ?? "",
+                    telegramChatId: data.TelegramChatId ?? data.telegramChatId ?? "",
                 });
-
             } catch (e: unknown) {
                 setError(e instanceof Error ? e.message : "Failed to load configuration");
             } finally {
@@ -44,9 +50,14 @@ export default function ConfigEditor() {
         })();
     }, []);
 
-    const setStr = (k: keyof Config) => (e: React.ChangeEvent<HTMLInputElement>) =>
-        cfg && setCfg({ ...cfg, [k]: e.target.value });
+    const setStr =
+        (k: keyof Config) =>
+            (e: React.ChangeEvent<HTMLInputElement>) =>
+                cfg && setCfg({ ...cfg, [k]: e.target.value });
 
+    // ------------------------------------------------------------
+    // Save configuration
+    // ------------------------------------------------------------
     const save = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!cfg) return;
@@ -55,14 +66,23 @@ export default function ConfigEditor() {
         setOk(null);
 
         if (!emailOk(cfg.email)) return setError("Invalid email format");
-        if (!phoneOk(cfg.phoneNumber)) return setError("Phone must be E.164 (+15551234567)");
+        if (!phoneOk(cfg.phoneNumber))
+            return setError("Phone must be E.164 (+15551234567)");
+
+        if (
+            (cfg.telegramBotToken && !cfg.telegramChatId) ||
+            (!cfg.telegramBotToken && cfg.telegramChatId)
+        ) {
+            return setError("Telegram Bot Token and Chat ID must both be provided.");
+        }
 
         setSaving(true);
         try {
-            // ✅ Explicit payload: ONLY fields we want to submit
             const payload = {
                 email: cfg.email,
                 phoneNumber: cfg.phoneNumber,
+                telegramBotToken: cfg.telegramBotToken,
+                telegramChatId: cfg.telegramChatId,
             };
 
             const res = await fetch("http://localhost:5213/api/configuration", {
@@ -90,7 +110,8 @@ export default function ConfigEditor() {
         <div
             className="min-h-screen flex flex-col text-gray-900"
             style={{
-                background: "linear-gradient(180deg, #3B82F6 0%, #2563EB 60%, #1E40AF 100%)",
+                background:
+                    "linear-gradient(180deg, #3B82F6 0%, #2563EB 60%, #1E40AF 100%)",
             }}
         >
             {/* Header */}
@@ -108,7 +129,7 @@ export default function ConfigEditor() {
                 </div>
             </header>
 
-            {/* Main Form */}
+            {/* Main */}
             <main className="flex-grow flex justify-center items-start py-10 px-6">
                 <form
                     onSubmit={save}
@@ -125,16 +146,16 @@ export default function ConfigEditor() {
                         </div>
                     )}
 
-                    {/* Alert Thresholds (Read-Only) */}
+                    {/* Thresholds */}
                     <section>
                         <h2 className="text-lg font-semibold mb-4 text-blue-700">
                             Alert Thresholds (System-Controlled)
                         </h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <Num label="Max Failed Logins" value={cfg.maxFailedLogins} disabled />
-                            <Num label="Max File Deletes" value={cfg.maxFileDeletes} disabled />
-                            <Num label="Max File Creates" value={cfg.maxFileCreates} disabled />
-                            <Num label="Max File Modifies" value={cfg.maxFileModifies} disabled />
+                            <Num label="Max Failed Logins" value={cfg.maxFailedLogins} />
+                            <Num label="Max File Deletes" value={cfg.maxFileDeletes} />
+                            <Num label="Max File Creates" value={cfg.maxFileCreates} />
+                            <Num label="Max File Modifies" value={cfg.maxFileModifies} />
                         </div>
                         <p className="text-sm text-gray-500 mt-3">
                             These values are managed automatically by LightShield.
@@ -152,15 +173,45 @@ export default function ConfigEditor() {
                                 type="email"
                                 value={cfg.email}
                                 onChange={setStr("email")}
+                                placeholder="alerts@company.com"
                             />
                             <Text
                                 label="Phone (E.164)"
                                 type="tel"
-                                placeholder="+15551234567"
                                 value={cfg.phoneNumber}
                                 onChange={setStr("phoneNumber")}
+                                placeholder="+15551234567"
                             />
                         </div>
+                    </section>
+
+                    {/* Telegram */}
+                    <section>
+                        <h2 className="text-lg font-semibold mb-2 text-blue-700">
+                            Telegram Alerts (Optional)
+                        </h2>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <Text
+                                label="Telegram Bot Token"
+                                type="text"
+                                value={cfg.telegramBotToken}
+                                onChange={setStr("telegramBotToken")}
+                                placeholder="123456:ABC-DEF..."
+                            />
+                            <Text
+                                label="Telegram Chat ID"
+                                type="text"
+                                value={cfg.telegramChatId}
+                                onChange={setStr("telegramChatId")}
+                                placeholder="123456789"
+                            />
+                        </div>
+
+                        <p className="text-sm text-gray-500 mt-3">
+                            You must open the bot in Telegram and press{" "}
+                            <strong>Start</strong> before alerts can be delivered.
+                        </p>
                     </section>
 
                     <div className="flex justify-end">
@@ -177,7 +228,8 @@ export default function ConfigEditor() {
 
             <footer className="text-center text-gray-200 text-sm py-4">
                 © {new Date().getFullYear()}{" "}
-                <span className="text-white font-medium">LightShield</span> — Secure. Lightweight. Reliable.
+                <span className="text-white font-medium">LightShield</span> — Secure.
+                Lightweight. Reliable.
             </footer>
         </div>
     );
@@ -190,21 +242,15 @@ export default function ConfigEditor() {
 function Num({
     label,
     value,
-    disabled = false,
 }: {
     label: string;
     value: number;
-    disabled?: boolean;
 }) {
     return (
         <label className="flex flex-col">
             <span className="text-sm font-medium text-gray-700">{label}</span>
             <input
-                className={`mt-1 p-2 border rounded-md transition
-                    ${disabled
-                        ? "bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed"
-                        : "border-gray-300 focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
-                    }`}
+                className="mt-1 p-2 border rounded-md bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed"
                 type="number"
                 value={value}
                 disabled
