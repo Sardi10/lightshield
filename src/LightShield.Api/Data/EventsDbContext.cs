@@ -16,6 +16,7 @@ namespace LightShield.Api.Data
         public DbSet<UserConfiguration> UserConfiguration { get; set; }
         public DbSet<IncidentState> IncidentStates { get; set; }
         public DbSet<FileActivityBaseline> FileActivityBaselines { get; set; }
+        public DbSet<HostRiskState> HostRiskStates { get; set; }
 
 
 

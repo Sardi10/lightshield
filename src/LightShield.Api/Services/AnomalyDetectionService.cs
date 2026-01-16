@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,6 +20,7 @@ namespace LightShield.Api.Services
         private const double FILE_Z_THRESHOLD = 4.0;
         private const double RANSOMWARE_Z_SINGLE = 3.0;
         private const double RANSOMWARE_Z_COMBINED = 7.0;
+        private const double RISK_ALERT_THRESHOLD = 10.0;
 
         public AnomalyDetectionService(
             IServiceProvider services,
@@ -189,37 +190,60 @@ namespace LightShield.Api.Services
                 double zDelete = ZScore(deletes / minutes, baseline.DeleteAvg, baseline.DeleteStd);
                 double zRename = ZScore(renames / minutes, baseline.RenameAvg, baseline.RenameStd);
 
-                if (zCreate >= FILE_Z_THRESHOLD)
-                    await HandleIncidentAsync(db, alertWriter, hostname, "FileCreateAnomaly", creates, newestEventTime, token);
+                // -------------------------------------------------
+                // RISK ACCUMULATION (ONCE PER CYCLE)
+                // -------------------------------------------------
+                double cycleRiskDelta = 0;
 
-                if (zModify >= FILE_Z_THRESHOLD)
-                    await HandleIncidentAsync(db, alertWriter, hostname, "FileModifyAnomaly", modifies, newestEventTime, token);
+                if (zCreate >= FILE_Z_THRESHOLD) cycleRiskDelta += 1.0;
+                if (zModify >= FILE_Z_THRESHOLD) cycleRiskDelta += 1.0;
+                if (zDelete >= FILE_Z_THRESHOLD) cycleRiskDelta += 3.0;
+                if (zRename >= FILE_Z_THRESHOLD) cycleRiskDelta += 4.0;
 
-                if (zDelete >= FILE_Z_THRESHOLD)
-                    await HandleIncidentAsync(db, alertWriter, hostname, "FileDeleteAnomaly", deletes, newestEventTime, token);
-
-                if (zRename >= FILE_Z_THRESHOLD)
-                    await HandleIncidentAsync(db, alertWriter, hostname, "FileRenameAnomaly", renames, newestEventTime, token);
-
+                // -------------------------------------------------
+                // RANSOMWARE CORRELATION (BONUS RISK)
+                // -------------------------------------------------
                 double ransomwareScore = zModify + zRename;
 
                 if (zModify >= RANSOMWARE_Z_SINGLE &&
                     zRename >= RANSOMWARE_Z_SINGLE &&
                     ransomwareScore >= RANSOMWARE_Z_COMBINED)
                 {
+                    cycleRiskDelta += 5.0; // correlation bonus
+                }
+
+                if (cycleRiskDelta <= 0)
+                    continue;
+
+                double risk = await UpdateHostRiskAsync(
+                    db,
+                    hostname,
+                    cycleRiskDelta,
+                    token);
+
+                _logger.LogInformation(
+                    "Host {Host} risk updated to {Risk:F2} (Δ={Delta})",
+                    hostname, risk, cycleRiskDelta);
+
+                // -------------------------------------------------
+                // SINGLE INCIDENT DECISION
+                // -------------------------------------------------
+                if (risk >= RISK_ALERT_THRESHOLD)
+                {
                     await HandleIncidentAsync(
                         db,
                         alertWriter,
                         hostname,
-                        "FileRansomwareBehavior",
-                        modifies + renames,
+                        "FileBehaviorAnomaly",
+                        creates + modifies + deletes + renames,
                         newestEventTime,
                         token);
                 }
             }
 
             await CloseMissingHostsAsync(
-                db, alertWriter,
+                db,
+                alertWriter,
                 "File",
                 groupedByHost.Select(g => g.Key).ToList(),
                 token);
@@ -239,6 +263,12 @@ namespace LightShield.Api.Services
         {
             var incident = await db.IncidentStates
                 .FirstOrDefaultAsync(i => i.Type == type && i.Hostname == hostname, token);
+
+            if (incident?.CooldownUntil != null &&
+               DateTime.UtcNow < incident.CooldownUntil)
+            {
+                return;
+            }
 
             const int MIN_EVENTS_FOR_START = 5;
             if (incident == null && currentCount < MIN_EVENTS_FOR_START)
@@ -321,6 +351,17 @@ namespace LightShield.Api.Services
                 incident.Hostname,
                 "END");
 
+            var riskState = await db.HostRiskStates
+                .FirstOrDefaultAsync(h => h.Hostname == incident.Hostname, token);
+
+            if (riskState != null)
+            {
+                // Reduce risk but do not reset it
+                riskState.RiskScore *= 0.3;
+                riskState.LastUpdated = DateTime.UtcNow;
+            }
+
+
             await db.SaveChangesAsync(token);
         }
 
@@ -359,6 +400,9 @@ namespace LightShield.Api.Services
         // =============================================================
         private static double ZScore(double current, double mean, double std)
         {
+            if (std <= 0.000001)
+                return 0;
+
             const double MIN_EFFECTIVE_STD = 0.2;
             double effectiveStd = Math.Max(std, MIN_EFFECTIVE_STD);
             return (current - mean) / effectiveStd;
@@ -387,6 +431,49 @@ namespace LightShield.Api.Services
                 "Event retention cleanup: removed {Count} events older than {Cutoff}",
                 oldEvents.Count,
                 cutoff);
+        }
+
+        private async Task<double> UpdateHostRiskAsync(
+            EventsDbContext db,
+            string hostname,
+            double riskDelta,
+            CancellationToken token)
+        {
+            var now = DateTime.UtcNow;
+
+            var riskState = await db.HostRiskStates
+                .FirstOrDefaultAsync(h => h.Hostname == hostname, token);
+
+            if (riskState == null)
+            {
+                riskState = new HostRiskState
+                {
+                    Hostname = hostname,
+                    RiskScore = 0,
+                    LastUpdated = now
+                };
+                db.HostRiskStates.Add(riskState);
+            }
+
+            // --------------------------------------------
+            // Apply time decay
+            // --------------------------------------------
+            var minutesElapsed = (now - riskState.LastUpdated).TotalMinutes;
+
+            const double DECAY_PER_MINUTE = 1.0 / 30.0; // 1 point every 30 min
+            var decay = minutesElapsed * DECAY_PER_MINUTE;
+
+            riskState.RiskScore = Math.Max(0, riskState.RiskScore - decay);
+
+            // --------------------------------------------
+            // Apply new risk
+            // --------------------------------------------
+            riskState.RiskScore += riskDelta;
+            riskState.LastUpdated = now;
+
+            await db.SaveChangesAsync(token);
+
+            return riskState.RiskScore;
         }
     }
 }
