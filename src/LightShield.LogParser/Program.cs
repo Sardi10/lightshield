@@ -1,259 +1,264 @@
-﻿// src/LightShield.LogParser/Program.cs
-
-using System;
-using System.IO;
+﻿using System;
 using System.Diagnostics;
-using System.Threading;
-using System.Security;
+using System.IO;
 using System.Net.Http;
+using System.Security;
+using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using LightShield.Common.Api;
 using LightShield.Common.Models;
-using System.Linq;
-using System.Text.RegularExpressions;
 
 namespace LightShield.LogParser
 {
     class Program
     {
-        static LightShieldApiClient? apiClient = null;
+        static readonly string LogFile = @"C:\ProgramData\LightShield\logparser.log";
+        static LightShieldApiClient? apiClient;
 
-        static void Main(string[] args)
-        {
-            // ------------------------------------------------------------
-            // API URL
-            // ------------------------------------------------------------
-            //var apiUrl = Environment.GetEnvironmentVariable("LIGHTSHIELD_API_URL");
-            var cfg = ConfigLoader.LoadConfig();
-            var apiUrl = cfg["apiUrl"];
-
-
-            if (!string.IsNullOrEmpty(apiUrl))
-            {
-                apiClient = new LightShieldApiClient(new HttpClient(), apiUrl);
-            }
-            else
-            {
-                Console.WriteLine("[LogParser]   LIGHTSHIELD_API_URL not set—events will not be sent.");
-            }
-
-            // ------------------------------------------------------------
-            // Decide which OS parser to run
-            // ------------------------------------------------------------
-            if (OperatingSystem.IsWindows())
-                WatchWindowsLog("Security");
-            else
-                WatchLinuxAuthLog("/var/log/auth.log");
-
-            Console.WriteLine("Press Ctrl+C to exit.");
-            Thread.Sleep(Timeout.Infinite);
-        }
-
-        // ======================================================================
-        // WINDOWS EVENT LOG PARSER
-        // ======================================================================
-        static void WatchWindowsLog(string logName)
+        static void Main()
         {
             try
             {
+                Log("LogParser starting (SYSTEM mode)");
+
+                InitializeApi();
+
+                if (OperatingSystem.IsWindows())
+                    WatchWindowsSecurityLog();
+                else
+                    WatchLinuxAuthLog("/var/log/auth.log");
+
+                Log("LogParser running");
+                Thread.Sleep(Timeout.Infinite);
+            }
+            catch (Exception ex)
+            {
+                Log("FATAL: " + ex);
+                Thread.Sleep(Timeout.Infinite);
+            }
+        }
+
+        // ------------------------------------------------------------
+        // API INITIALIZATION
+        // ------------------------------------------------------------
+        static void InitializeApi()
+        {
+            try
+            {
+                var cfg = ConfigLoader.LoadConfig();
+                var apiUrl = cfg["apiUrl"];
+
+                if (string.IsNullOrWhiteSpace(apiUrl))
+                    throw new Exception("apiUrl missing from config");
+
+                apiClient = new LightShieldApiClient(new HttpClient(), apiUrl);
+                Log($"API client initialized: {apiUrl}");
+            }
+            catch (Exception ex)
+            {
+                Log("API init failed: " + ex);
+            }
+        }
+
+        // ------------------------------------------------------------
+        // WINDOWS EVENT LOG WATCHER
+        // ------------------------------------------------------------
+        static void WatchWindowsSecurityLog()
+        {
+            try
+            {
+                const string logName = "Security";
+
                 if (!EventLog.Exists(logName))
                 {
-                    Console.WriteLine($"[LogParser] EventLog '{logName}' not found.");
+                    Log($"EventLog '{logName}' not found");
                     return;
                 }
 
                 var log = new EventLog(logName);
-
-                log.EntryWritten += (s, e) =>
-                {
-                    long eventId = (long)e.Entry.InstanceId;
-
-                    // Only monitor Windows LoginSuccess / LoginFailure
-                    if (eventId != 4624 && eventId != 4625)
-                        return;
-
-                    _ = Task.Run(async () =>
-                    {
-                        var rawMessage = e.Entry.Message;
-
-                        int logonType = ExtractLogonType(rawMessage);
-                        string? username = ExtractUsername(rawMessage);
-                        string? sourceIp = ExtractIPAddress(rawMessage);
-
-                        bool isSuccess = eventId == 4624;
-                        bool keep = ShouldKeepWindowsEvent(isSuccess, logonType);
-
-                        if (!keep)
-                            return;
-
-                        var evt = new Event
-                        {
-                            Source = "logparser",
-                            OperatingSystem = "windows",
-                            EventId = (int)eventId,
-                            LogonType = logonType,
-                            Username = username,
-                            IPAddress = sourceIp,
-                            Type = isSuccess ? "LoginSuccess" : "LoginFailure",
-                            PathOrMessage = rawMessage.Split('\n')[0],
-                            Timestamp = DateTime.Now,
-                            Hostname = Environment.MachineName,
-                            Severity = isSuccess ? "Info" : "Warning"
-                        };
-
-                        if (apiClient != null)
-                        {
-                            var ok = await apiClient.PostEventAsync(evt);
-                            Console.WriteLine(ok
-                                ? $"[LogParser] Posted Windows {evt.Type} (LogonType={logonType})"
-                                : $"[LogParser] Failed to post Windows event");
-                        }
-                    });
-                };
-
+                log.EntryWritten += OnWindowsEvent;
                 log.EnableRaisingEvents = true;
-                Console.WriteLine($"[LogParser] Watching Windows EventLog: {logName}");
+
+                Log("Watching Windows Security EventLog");
             }
             catch (SecurityException)
             {
-                Console.WriteLine($"[LogParser] Insufficient privileges to read '{logName}'. Run as Administrator.");
+                Log("Insufficient privileges to read Security log (should not happen under SYSTEM)");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[LogParser] Error initializing EventLog: {ex.Message}");
+                Log("Failed to initialize EventLog: " + ex);
             }
         }
 
-        // ======================================================================
-        // LINUX AUTH.LOG PARSER
-        // ======================================================================
-        static void WatchLinuxAuthLog(string path)
+        static void OnWindowsEvent(object sender, EntryWrittenEventArgs e)
         {
-            var dir = Path.GetDirectoryName(path);
-            var file = Path.GetFileName(path);
-            long lastPos = File.Exists(path) ? new FileInfo(path).Length : 0;
-
-            var watcher = new FileSystemWatcher(dir!, file)
+            try
             {
-                NotifyFilter = NotifyFilters.LastWrite,
-                EnableRaisingEvents = true
-            };
+                long eventId = (long)e.Entry.InstanceId;
 
-            watcher.Changed += (s, e) =>
+                // Only login success/failure
+                if (eventId != 4624 && eventId != 4625)
+                    return;
+
+                _ = Task.Run(() => HandleWindowsEvent(e.Entry, eventId));
+            }
+            catch (Exception ex)
             {
-                using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                fs.Seek(lastPos, SeekOrigin.Begin);
-
-                using var sr = new StreamReader(fs);
-                string? line;
-
-                while ((line = sr.ReadLine()) != null)
-                {
-                    bool isSuccess = line.Contains("session opened for user");
-                    bool isFailure = line.Contains("Failed password");
-
-                    if (!isSuccess && !isFailure)
-                        continue;
-
-                    string? username = ExtractLinuxUsername(line);
-                    string? ip = ExtractLinuxIP(line);
-
-                    _ = Task.Run(async () =>
-                    {
-                        var evt = new Event
-                        {
-                            Source = "logparser",
-                            OperatingSystem = "linux",
-                            Type = isSuccess ? "LoginSuccess" : "LoginFailure",
-                            PathOrMessage = line,
-                            Timestamp = DateTime.Now,
-                            Hostname = Environment.MachineName,
-                            Username = username,
-                            IPAddress = ip,
-                            Severity = isSuccess ? "Info" : "Warning"
-                        };
-
-                        if (apiClient != null)
-                        {
-                            var ok = await apiClient.PostEventAsync(evt);
-                            Console.WriteLine(ok
-                                ? $"[LogParser] Posted Linux {evt.Type}"
-                                : $"[LogParser] Failed to post Linux event");
-                        }
-                    });
-                }
-
-                lastPos = fs.Position;
-            };
-
-            Console.WriteLine($"[LogParser] Watching Linux auth log: {path}");
+                Log("Event handler error: " + ex);
+            }
         }
 
-        // ======================================================================
-        // HELPERS FOR WINDOWS
-        // ======================================================================
+        static async Task HandleWindowsEvent(EventLogEntry entry, long eventId)
+        {
+            try
+            {
+                string raw = entry.Message;
+
+                int logonType = ExtractLogonType(raw);
+                bool isSuccess = eventId == 4624;
+
+                if (!ShouldKeepWindowsEvent(isSuccess, logonType))
+                    return;
+
+                var evt = new Event
+                {
+                    Source = "logparser",
+                    OperatingSystem = "windows",
+                    EventId = (int)eventId,
+                    LogonType = logonType,
+                    Username = ExtractUsername(raw),
+                    IPAddress = ExtractIPAddress(raw),
+                    Type = isSuccess ? "LoginSuccess" : "LoginFailure",
+                    PathOrMessage = raw.Split('\n')[0],
+                    Timestamp = DateTime.UtcNow,
+                    Hostname = Environment.MachineName,
+                    Severity = isSuccess ? "Info" : "Warning"
+                };
+
+                if (apiClient != null)
+                {
+                    await apiClient.PostEventAsync(evt);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("Failed to process Windows event: " + ex);
+            }
+        }
+
+        // ------------------------------------------------------------
+        // LINUX AUTH LOG WATCHER (kept for parity)
+        // ------------------------------------------------------------
+        static void WatchLinuxAuthLog(string path)
+        {
+            try
+            {
+                long lastPos = File.Exists(path) ? new FileInfo(path).Length : 0;
+                var watcher = new FileSystemWatcher(Path.GetDirectoryName(path)!, Path.GetFileName(path))
+                {
+                    NotifyFilter = NotifyFilters.LastWrite,
+                    EnableRaisingEvents = true
+                };
+
+                watcher.Changed += (_, __) =>
+                {
+                    using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    fs.Seek(lastPos, SeekOrigin.Begin);
+
+                    using var sr = new StreamReader(fs);
+                    string? line;
+                    while ((line = sr.ReadLine()) != null)
+                        HandleLinuxLine(line).Wait();
+
+                    lastPos = fs.Position;
+                };
+
+                Log("Watching Linux auth log");
+            }
+            catch (Exception ex)
+            {
+                Log("Linux watcher failed: " + ex);
+            }
+        }
+
+        static async Task HandleLinuxLine(string line)
+        {
+            bool success = line.Contains("session opened for user");
+            bool failure = line.Contains("Failed password");
+
+            if (!success && !failure)
+                return;
+
+            var evt = new Event
+            {
+                Source = "logparser",
+                OperatingSystem = "linux",
+                Type = success ? "LoginSuccess" : "LoginFailure",
+                PathOrMessage = line,
+                Timestamp = DateTime.UtcNow,
+                Hostname = Environment.MachineName,
+                Username = ExtractLinuxUsername(line),
+                IPAddress = ExtractLinuxIP(line),
+                Severity = success ? "Info" : "Warning"
+            };
+
+            if (apiClient != null)
+                await apiClient.PostEventAsync(evt);
+        }
+
+        // ------------------------------------------------------------
+        // HELPERS
+        // ------------------------------------------------------------
         static int ExtractLogonType(string msg)
         {
             foreach (var line in msg.Split('\n'))
-            {
-                if (line.Contains("Logon Type:", StringComparison.OrdinalIgnoreCase))
-                {
-                    var parts = line.Split(':');
-                    if (parts.Length > 1 && int.TryParse(parts[1].Trim(), out int lt))
-                        return lt;
-                }
-            }
+                if (line.Contains("Logon Type:", StringComparison.OrdinalIgnoreCase) &&
+                    int.TryParse(line.Split(':').Last().Trim(), out int t))
+                    return t;
+
             return -1;
         }
 
         static string? ExtractUsername(string msg)
         {
             foreach (var line in msg.Split('\n'))
-            {
                 if (line.Contains("Account Name:", StringComparison.OrdinalIgnoreCase))
-                {
-                    var parts = line.Split(':');
-                    if (parts.Length > 1)
-                        return parts[1].Trim();
-                }
-            }
+                    return line.Split(':').Last().Trim();
+
             return null;
         }
 
         static string? ExtractIPAddress(string msg)
         {
-            var ipMatch = Regex.Match(msg, @"\b\d{1,3}(\.\d{1,3}){3}\b");
-            return ipMatch.Success ? ipMatch.Value : null;
+            var m = Regex.Match(msg, @"\b\d{1,3}(\.\d{1,3}){3}\b");
+            return m.Success ? m.Value : null;
         }
 
-        // Windows event noise filtering
-        static bool ShouldKeepWindowsEvent(bool isSuccess, int logonType)
+        static bool ShouldKeepWindowsEvent(bool success, int logonType)
         {
-            if (isSuccess)
-            {
-                // Only real human or remote interactive logons
-                return logonType == 2 || logonType == 10;
-            }
-            else
-            {
-                // Keep failures for brute-force detection
-                return logonType == 2 || logonType == 3 || logonType == 10;
-            }
+            return success
+                ? (logonType == 2 || logonType == 10)
+                : (logonType == 2 || logonType == 3 || logonType == 10);
         }
 
-        // ======================================================================
-        // HELPERS FOR LINUX
-        // ======================================================================
         static string? ExtractLinuxUsername(string line)
         {
-            var match = Regex.Match(line, @"for user (\w+)");
-            return match.Success ? match.Groups[1].Value : null;
+            var m = Regex.Match(line, @"for user (\w+)");
+            return m.Success ? m.Groups[1].Value : null;
         }
 
         static string? ExtractLinuxIP(string line)
         {
-            var match = Regex.Match(line, @"from (\d{1,3}(\.\d{1,3}){3})");
-            return match.Success ? match.Groups[1].Value : null;
+            var m = Regex.Match(line, @"from (\d{1,3}(\.\d{1,3}){3})");
+            return m.Success ? m.Groups[1].Value : null;
+        }
+
+        static void Log(string msg)
+        {
+            Directory.CreateDirectory(@"C:\ProgramData\LightShield");
+            File.AppendAllText(LogFile, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {msg}\n");
         }
     }
 }

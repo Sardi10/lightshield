@@ -60,5 +60,20 @@ namespace LightShield.Api.Services
             return cfg?.PhoneNumber;
         }
 
+        public async Task<string?> GetTelegramBotTokenAsync()
+        {
+            var cfg = await _db.Set<UserConfiguration>().FirstOrDefaultAsync();
+            return cfg?.TelegramBotToken;
+        }
+
+        public async Task<string?> GetTelegramChatIdAsync()
+        {
+            var cfg = await _db.Set<UserConfiguration>().FirstOrDefaultAsync();
+            return cfg?.TelegramChatId;
+        }
+
+
+
+
     }
 }

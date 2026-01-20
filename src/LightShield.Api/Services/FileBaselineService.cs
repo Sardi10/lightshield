@@ -3,12 +3,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using LightShield.Api.Data;
 using LightShield.Api.Models;
-using LightShield.Api.Services.Alerts;
 
 namespace LightShield.Api.Services
 {
@@ -44,7 +40,8 @@ namespace LightShield.Api.Services
                 var hostname = hostGroup.Key;
 
                 double minutes = (baselineWindowEnd - baselineWindowStart).TotalMinutes;
-                if (minutes <= 0) continue;
+                if (minutes <= 0)
+                    continue;
 
                 double createRate = hostGroup.Count(e => e.Type == "filecreate") / minutes;
                 double modifyRate = hostGroup.Count(e => e.Type == "filemodify") / minutes;
@@ -58,7 +55,10 @@ namespace LightShield.Api.Services
                 {
                     baseline = new FileActivityBaseline
                     {
-                        Hostname = hostname
+                        Hostname = hostname,
+                        FirstSeen = DateTime.UtcNow,
+                        LastUpdated = DateTime.UtcNow,
+                        DetectionEnabled = false
                     };
                     _db.FileActivityBaselines.Add(baseline);
                 }
@@ -94,7 +94,13 @@ namespace LightShield.Api.Services
         {
             var diff = value - mean;
             var variance = diff * diff;
-            return Math.Sqrt((oldStd * oldStd + variance) / 2);
+
+            const double MIN_PERSISTED_STD = 0.05;
+
+            return Math.Max(
+                Math.Sqrt((oldStd * oldStd + variance) / 2),
+                MIN_PERSISTED_STD
+            );
         }
     }
 }

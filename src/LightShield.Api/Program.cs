@@ -62,9 +62,12 @@ builder.Services.AddDbContext<EventsDbContext>(options =>
 
 // Alerting Services 
 builder.Services.AddScoped<TwilioAlertService>();
+builder.Services.AddScoped<TelegramAlertService>();
 builder.Services.AddScoped<SmtpAlertService>();
 builder.Services.AddScoped<IAlertService, CompositeAlertService>();
 builder.Services.AddScoped<AlertWriterService>();
+builder.Services.AddHttpClient();
+
 
 // Background anomaly detection
 builder.Services.AddHostedService<AnomalyDetectionService>();

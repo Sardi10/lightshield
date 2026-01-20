@@ -2,10 +2,10 @@ using System;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using LightShield.Api.Data;
 using LightShield.Api.Models;
 using LightShield.Api.Services.Alerts;
-
 
 namespace LightShield.Api.Services
 {
@@ -14,18 +14,20 @@ namespace LightShield.Api.Services
         private readonly EventsDbContext _db;
         private readonly IAlertService _alertService;
         private readonly ConfigurationService _config;
+        private readonly IServiceProvider _services;
         private readonly ILogger<AlertWriterService> _logger;
 
         public AlertWriterService(
             EventsDbContext db,
             IAlertService alertService,
             ConfigurationService config,
+            IServiceProvider services,
             ILogger<AlertWriterService> logger)
-
         {
             _db = db;
             _alertService = alertService;
             _config = config;
+            _services = services;
             _logger = logger;
         }
 
@@ -35,30 +37,10 @@ namespace LightShield.Api.Services
             string hostname,
             string phase)
         {
-            // ----------------------------------------------------
-            // Deduplicate START only
-            // ----------------------------------------------------
-            if (phase == "START")
-            {
-                var recentStart = await _db.Alerts.AnyAsync(a =>
-                    a.Type == type &&
-                    a.Hostname == hostname &&
-                    a.Phase == "START" &&
-                    a.Timestamp > DateTime.UtcNow.AddSeconds(-30));
-
-                if (recentStart)
-                {
-                    _logger.LogWarning(
-                        "Alert suppressed (duplicate START within 30s): {Type} on {Host}",
-                        type,
-                        hostname
-                    );
-                    return;
-                }
-            }
+            
 
             // ----------------------------------------------------
-            // Save alert to DB
+            // Persist alert (ALWAYS)
             // ----------------------------------------------------
             var alert = new Alert
             {
@@ -67,7 +49,7 @@ namespace LightShield.Api.Services
                 Phase = phase,
                 Message = description,
                 Hostname = hostname,
-                Channel = "Email/SMS"
+                Channel = "Email,Telegram"
             };
 
             _db.Alerts.Add(alert);
@@ -75,13 +57,10 @@ namespace LightShield.Api.Services
 
             _logger.LogInformation(
                 "Alert saved. Type={Type}, Phase={Phase}, Host={Host}",
-                alert.Type,
-                alert.Phase,
-                alert.Hostname
-            );
+                type, phase, hostname);
 
             // ----------------------------------------------------
-            // Build message
+            // Format message
             // ----------------------------------------------------
             string localTime = alert.Timestamp.ToLocalTime().ToString("f");
 
@@ -94,38 +73,83 @@ namespace LightShield.Api.Services
                 $"Details: {alert.Message}";
 
             // ----------------------------------------------------
-            // Delivery config
+            // Load delivery configuration (DB-driven)
             // ----------------------------------------------------
             string? email = await _config.GetEmailAsync();
-            string? phone = await _config.GetPhoneAsync();
+            string? botToken = await _config.GetTelegramBotTokenAsync();
+            string? chatId = await _config.GetTelegramChatIdAsync();
 
-            if (string.IsNullOrWhiteSpace(email) &&
-                string.IsNullOrWhiteSpace(phone))
+            bool hasEmail = !string.IsNullOrWhiteSpace(email);
+            bool hasTelegram =
+                !string.IsNullOrWhiteSpace(botToken) &&
+                !string.IsNullOrWhiteSpace(chatId);
+
+            // ----------------------------------------------------
+            // No delivery channels configured -> stop here
+            // ----------------------------------------------------
+            if (!hasEmail && !hasTelegram)
             {
-                _logger.LogWarning("Alert generated but no delivery channels configured.");
+                _logger.LogWarning(
+                    "Alert saved but no delivery channels configured. Type={Type}, Phase={Phase}",
+                    type, phase);
                 return;
             }
 
-            // ----------------------------------------------------
-            // Send notification
-            // ----------------------------------------------------
-            try
-            {
-                await _alertService.SendAlertAsync(email, phone, formattedMessage);
+            bool delivered = false;
 
-                _logger.LogInformation(
-                    "Alert delivered. Type={Type}, Phase={Phase}, Host={Host}",
-                    alert.Type,
-                    alert.Phase,
-                    alert.Hostname
-                );
-            }
-            catch (Exception ex)
+            // ----------------------------------------------------
+            // EMAIL delivery
+            // ----------------------------------------------------
+            if (hasEmail)
             {
-                _logger.LogError(
-                    ex,
-                    "Alert saved but failed to deliver."
-                );
+                try
+                {
+                    await _alertService.SendAlertAsync(
+                        email,
+                        phone: null, // SMS optional / deprecated
+                        formattedMessage);
+
+                    delivered = true;
+                    _logger.LogInformation("Email alert delivered.");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Email delivery failed.");
+                }
+            }
+
+            // ----------------------------------------------------
+            // TELEGRAM delivery (SAFE, per-user, DB-driven)
+            // ----------------------------------------------------
+            if (hasTelegram)
+            {
+                try
+                {
+                    var telegram =
+                        _services.GetRequiredService<TelegramAlertService>();
+
+                    await telegram.SendAsync(
+                        botToken!,
+                        chatId!,
+                        formattedMessage);
+
+                    delivered = true;
+                    _logger.LogInformation("Telegram alert delivered.");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Telegram delivery failed.");
+                }
+            }
+
+            // ----------------------------------------------------
+            // Final delivery check
+            // ----------------------------------------------------
+            if (!delivered)
+            {
+                _logger.LogWarning(
+                    "Alert saved but delivery failed on all channels. Type={Type}, Host={Host}",
+                    type, hostname);
             }
         }
     }

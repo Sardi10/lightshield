@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,7 +20,7 @@ namespace LightShield.Api.Services
         private const double FILE_Z_THRESHOLD = 4.0;
         private const double RANSOMWARE_Z_SINGLE = 3.0;
         private const double RANSOMWARE_Z_COMBINED = 7.0;
-
+        private const double RISK_ALERT_THRESHOLD = 10.0;
 
         public AnomalyDetectionService(
             IServiceProvider services,
@@ -42,11 +42,9 @@ namespace LightShield.Api.Services
 
                     var baselineService =
                         scope.ServiceProvider.GetRequiredService<FileBaselineService>();
-      
                     await baselineService.UpdateBaselinesAsync(stoppingToken);
 
-                    using var dbScope = _services.CreateScope();
-                    var db = dbScope.ServiceProvider.GetRequiredService<EventsDbContext>();
+                    var db = scope.ServiceProvider.GetRequiredService<EventsDbContext>();
 
                     await PruneOldEventsAsync(db, stoppingToken);
 
@@ -60,7 +58,6 @@ namespace LightShield.Api.Services
 
                 await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
             }
-
 
             _logger.LogInformation("AnomalyDetectionService stopped.");
         }
@@ -77,12 +74,12 @@ namespace LightShield.Api.Services
             var cutoff = DateTime.UtcNow.AddMinutes(-5);
 
             var events = await db.Events
-                .Where(e => e.Type == "failedlogin" && e.Timestamp >= cutoff)
+                .Where(e => e.Type == "loginfailure" && e.Timestamp >= cutoff)
                 .ToListAsync(token);
 
             const int THRESHOLD = 5;
 
-            var groupedByHost = events.GroupBy(e => e.Hostname).ToList();
+            var groupedByHost = events.GroupBy(e => e.Hostname);
 
             foreach (var group in groupedByHost)
             {
@@ -90,39 +87,43 @@ namespace LightShield.Api.Services
                 var count = group.Count();
                 var newestEventTime = group.Max(e => e.Timestamp);
 
-                _logger.LogInformation(
-                    "FailedLogin host={Host} count={Count}",
+                if (count < THRESHOLD)
+                    continue;
+
+                
+                
+                bool alreadyReported = await db.Anomalies.AnyAsync(a =>
+                    a.Type == "FailedLoginBurst" &&
+                    a.Hostname == hostname &&
+                    a.Timestamp >= cutoff,
+                    token);
+
+                if (alreadyReported)
+                    continue;
+                
+
+                await db.Anomalies.AddAsync(new Anomaly
+                {
+                    Type = "FailedLoginBurst",
+                    Hostname = hostname,
+                    Timestamp = newestEventTime,
+                    Description = $"Failed login burst: {count} attempts in 5 minutes"
+                }, token);
+
+                await alertWriter.CreateAndSendAlertAsync(
+                    "FailedLoginBurst",
+                    $"Failed login burst detected on {hostname} ({count} attempts in 5 minutes)",
+                    hostname,
+                    "SINGLE");
+
+                _logger.LogWarning(
+                    "FAILED LOGIN BURST host={Host} count={Count}",
                     hostname, count);
-
-                var incident = await db.IncidentStates
-                    .FirstOrDefaultAsync(i =>
-                        i.Type == "FailedLoginBurst" &&
-                        i.Hostname == hostname,
-                        token);
-
-                if (count >= THRESHOLD)
-                {
-                    await HandleIncidentAsync(
-                        db, alertWriter,
-                        hostname,
-                        "FailedLoginBurst",
-                        count,
-                        newestEventTime,
-                        token);
-                }
-                else if (incident != null && incident.IsActive)
-                {
-                    await CloseIncidentAsync(db, alertWriter, incident, token);
-                }
             }
 
-            // close incidents for hosts with ZERO events
-            await CloseMissingHostsAsync(
-                db, alertWriter,
-                "FailedLoginBurst",
-                groupedByHost.Select(g => g.Key).ToList(),
-                token);
+            await db.SaveChangesAsync(token);
         }
+
 
         // =============================================================
         // FILE TAMPER BURSTS
@@ -158,7 +159,7 @@ namespace LightShield.Api.Services
                     continue;
 
                 // -------------------------------------------------
-                // One-time stabilization check (DO NOT REMOVE)
+                // Baseline stabilization gate
                 // -------------------------------------------------
                 if (!baseline.DetectionEnabled)
                 {
@@ -180,39 +181,11 @@ namespace LightShield.Api.Services
                             "Baseline stabilized for host={Host}. Detection ENABLED.",
                             hostname);
                     }
+                    else
+                    {
+                        continue;
+                    }
                 }
-
-                // Detection disabled until baseline is stable (time + variance)
-                if (!baseline.DetectionEnabled)
-                {
-                    _logger.LogInformation(
-                        "Baseline learning in progress for host={Host} (elapsed {Hours:F1}h)",
-                        hostname,
-                        (DateTime.UtcNow - baseline.FirstSeen).TotalHours);
-
-                    continue;
-                }
-
-
-                // =============================================================
-                // COOLDOWN CHECK (AVOID ALERT STORMS)
-                // =============================================================
-                var activeFileIncident = await db.IncidentStates
-                    .FirstOrDefaultAsync(i =>
-                        i.Hostname == hostname &&
-                        i.IsActive &&
-                        i.Type.StartsWith("File"),
-                        token);
-
-                if (activeFileIncident?.CooldownUntil != null &&
-                    DateTime.UtcNow < activeFileIncident.CooldownUntil)
-                {
-                    _logger.LogInformation(
-                        "File incident cooldown active for host={Host}, skipping detection",
-                        hostname);
-                    continue;
-                }
-
 
                 int creates = group.Count(e => e.Type == "filecreate");
                 int modifies = group.Count(e => e.Type == "filemodify");
@@ -221,70 +194,67 @@ namespace LightShield.Api.Services
 
                 double minutes = 5.0;
 
-                double createRate = creates / minutes;
-                double modifyRate = modifies / minutes;
-                double deleteRate = deletes / minutes;
-                double renameRate = renames / minutes;
+                double zCreate = ZScore(creates / minutes, baseline.CreateAvg, baseline.CreateStd);
+                double zModify = ZScore(modifies / minutes, baseline.ModifyAvg, baseline.ModifyStd);
+                double zDelete = ZScore(deletes / minutes, baseline.DeleteAvg, baseline.DeleteStd);
+                double zRename = ZScore(renames / minutes, baseline.RenameAvg, baseline.RenameStd);
 
-                double zCreate = ZScore(createRate, baseline.CreateAvg, baseline.CreateStd);
-                double zModify = ZScore(modifyRate, baseline.ModifyAvg, baseline.ModifyStd);
-                double zDelete = ZScore(deleteRate, baseline.DeleteAvg, baseline.DeleteStd);
-                double zRename = ZScore(renameRate, baseline.RenameAvg, baseline.RenameStd);
+                // -------------------------------------------------
+                // RISK ACCUMULATION (ONCE PER CYCLE)
+                // -------------------------------------------------
+                double cycleRiskDelta = 0;
 
-                _logger.LogInformation(
-                    "FileBurst host={Host} c={C} m={M} d={D} r={R}",
-                    hostname, creates, modifies, deletes, renames);
+                if (zCreate >= FILE_Z_THRESHOLD) cycleRiskDelta += 1.0;
+                if (zModify >= FILE_Z_THRESHOLD) cycleRiskDelta += 1.0;
+                if (zDelete >= FILE_Z_THRESHOLD) cycleRiskDelta += 3.0;
+                if (zRename >= FILE_Z_THRESHOLD) cycleRiskDelta += 4.0;
 
-                if (zCreate >= FILE_Z_THRESHOLD)
-                {
-                    await HandleIncidentAsync(db, alertWriter, hostname,
-                        "FileCreateAnomaly", creates, newestEventTime, token);
-                }
-
-                if (zModify >= FILE_Z_THRESHOLD)
-                {
-                    await HandleIncidentAsync(db, alertWriter, hostname,
-                        "FileModifyAnomaly", modifies, newestEventTime, token);
-                }
-
-                if (zDelete >= FILE_Z_THRESHOLD)
-                {
-                    await HandleIncidentAsync(db, alertWriter, hostname,
-                        "FileDeleteAnomaly", deletes, newestEventTime, token);
-                }
-
-                if (zRename >= FILE_Z_THRESHOLD)
-                {
-                    await HandleIncidentAsync(db, alertWriter, hostname,
-                        "FileRenameAnomaly", renames, newestEventTime, token);
-                }
-
-                // =============================================================
-                // RANSOMWARE-STYLE CORRELATION (MODIFY + RENAME)
-                // =============================================================
-                
+                // -------------------------------------------------
+                // RANSOMWARE CORRELATION (BONUS RISK)
+                // -------------------------------------------------
                 double ransomwareScore = zModify + zRename;
 
                 if (zModify >= RANSOMWARE_Z_SINGLE &&
                     zRename >= RANSOMWARE_Z_SINGLE &&
                     ransomwareScore >= RANSOMWARE_Z_COMBINED)
                 {
+                    cycleRiskDelta += 5.0; // correlation bonus
+                }
+
+                if (cycleRiskDelta <= 0)
+                    continue;
+
+                double risk = await UpdateHostRiskAsync(
+                    db,
+                    hostname,
+                    cycleRiskDelta,
+                    token);
+
+                _logger.LogInformation(
+                    "Host {Host} risk updated to {Risk:F2} (Δ={Delta})",
+                    hostname, risk, cycleRiskDelta);
+
+                // -------------------------------------------------
+                // SINGLE INCIDENT DECISION
+                // -------------------------------------------------
+                if (risk >= RISK_ALERT_THRESHOLD)
+                {
                     await HandleIncidentAsync(
                         db,
                         alertWriter,
                         hostname,
-                        "FileRansomwareBehavior",
-                        modifies + renames,
+                        "FileBehaviorAnomaly",
+                        creates + modifies + deletes + renames,
                         newestEventTime,
                         token);
                 }
-
             }
 
             await CloseMissingHostsAsync(
-                db, alertWriter,
-                typePrefix: "File",
-                activeHosts: groupedByHost.Select(g => g.Key).ToList(),
+                db,
+                alertWriter,
+                "File",
+                groupedByHost.Select(g => g.Key).ToList(),
                 token);
         }
 
@@ -303,36 +273,43 @@ namespace LightShield.Api.Services
             var incident = await db.IncidentStates
                 .FirstOrDefaultAsync(i => i.Type == type && i.Hostname == hostname, token);
 
-
-            // Avoid triggering incidents on tiny, one-off spikes
-            const int MIN_EVENTS_FOR_START = 5;
-
-            if (incident == null && currentCount < MIN_EVENTS_FOR_START)
+            if (incident?.CooldownUntil != null &&
+               DateTime.UtcNow < incident.CooldownUntil)
             {
                 return;
             }
 
+            const int MIN_EVENTS_FOR_START = 5;
+            if (incident == null && currentCount < MIN_EVENTS_FOR_START)
+                return;
 
-            // =============================================================
-            // START NEW OR RESTART CLOSED INCIDENT
-            // =============================================================
-            if (incident == null || !incident.IsActive)
+            bool isNewStart = false;
+
+            if (incident == null)
             {
-                if (incident == null)
+                incident = new IncidentState
                 {
-                    incident = new IncidentState
-                    {
-                        Type = type,
-                        Hostname = hostname
-                    };
-                    db.IncidentStates.Add(incident);
-                }
-
+                    Type = type,
+                    Hostname = hostname,
+                    StartTime = newestEventTime,
+                    IsActive = true
+                };
+                db.IncidentStates.Add(incident);
+                isNewStart = true;
+            }
+            else if (!incident.IsActive)
+            {
                 incident.IsActive = true;
                 incident.StartTime = newestEventTime;
-                incident.LastEventTime = newestEventTime;
-                incident.Count = currentCount;
+                isNewStart = true;
+            }
 
+            // Always update activity
+            incident.LastEventTime = newestEventTime;
+            incident.Count = Math.Max(incident.Count, currentCount);
+
+            if (isNewStart)
+            {
                 db.Anomalies.Add(new Anomaly
                 {
                     Timestamp = DateTime.UtcNow,
@@ -347,23 +324,13 @@ namespace LightShield.Api.Services
                     type,
                     $"Incident STARTED at {newestEventTime:u}. Initial count: {currentCount}.",
                     hostname,
-                    "START"
-                );
-
-                return;
+                    "START");
             }
-
-            // =============================================================
-            // CONTINUE ACTIVE INCIDENT
-            // =============================================================
-            if (newestEventTime > incident.LastEventTime)
+            else
             {
-                incident.LastEventTime = newestEventTime;
-                incident.Count = Math.Max(incident.Count, currentCount);
                 await db.SaveChangesAsync(token);
             }
         }
-
 
         // =============================================================
         // CLOSE
@@ -374,13 +341,7 @@ namespace LightShield.Api.Services
             IncidentState incident,
             CancellationToken token)
         {
-            _logger.LogInformation(
-                "Closing incident {Type} on {Host}",
-                incident.Type, incident.Hostname);
-
             incident.IsActive = false;
-
-            // Set cooldown to prevent immediate re-triggering
             incident.CooldownUntil = DateTime.UtcNow.AddMinutes(10);
 
             db.Anomalies.Add(new Anomaly
@@ -399,35 +360,18 @@ namespace LightShield.Api.Services
                 incident.Hostname,
                 "END");
 
+            var riskState = await db.HostRiskStates
+                .FirstOrDefaultAsync(h => h.Hostname == incident.Hostname, token);
+
+            if (riskState != null)
+            {
+                // Reduce risk but do not reset it
+                riskState.RiskScore *= 0.3;
+                riskState.LastUpdated = DateTime.UtcNow;
+            }
+
+
             await db.SaveChangesAsync(token);
-        }
-
-        // =============================================================
-        // EVALUATE ONE BURST
-        // Legacy threshold-based evaluation.
-        // Retained for future detectors or comparison purposes.
-        // =============================================================
-        private async Task EvaluateBurst(
-            EventsDbContext db,
-            AlertWriterService alertWriter,
-            string hostname,
-            string type,
-            int count,
-            int threshold,
-            DateTime newestEventTime,
-            CancellationToken token)
-        {
-            var incident = await db.IncidentStates
-                .FirstOrDefaultAsync(i => i.Type == type && i.Hostname == hostname, token);
-
-            if (count >= threshold)
-            {
-                await HandleIncidentAsync(db, alertWriter, hostname, type, count, newestEventTime, token);
-            }
-            else if (incident != null && incident.IsActive)
-            {
-                await CloseIncidentAsync(db, alertWriter, incident, token);
-            }
         }
 
         // =============================================================
@@ -440,6 +384,8 @@ namespace LightShield.Api.Services
             System.Collections.Generic.List<string> activeHosts,
             CancellationToken token)
         {
+            var now = DateTime.UtcNow;
+
             var activeIncidents = await db.IncidentStates
                 .Where(i =>
                     i.IsActive &&
@@ -450,7 +396,8 @@ namespace LightShield.Api.Services
 
             foreach (var incident in activeIncidents)
             {
-                if (!activeHosts.Contains(incident.Hostname))
+                if (!activeHosts.Contains(incident.Hostname) &&
+                    incident.LastEventTime < now.AddSeconds(-15))
                 {
                     await CloseIncidentAsync(db, alertWriter, incident, token);
                 }
@@ -458,29 +405,25 @@ namespace LightShield.Api.Services
         }
 
         // =============================================================
-        // Z-SCORE CALCULATION
+        // Z-SCORE
         // =============================================================
         private static double ZScore(double current, double mean, double std)
         {
             if (std <= 0.000001)
                 return 0;
 
-            // Soft statistical floor to prevent early-baseline explosions
             const double MIN_EFFECTIVE_STD = 0.2;
-
             double effectiveStd = Math.Max(std, MIN_EFFECTIVE_STD);
-
             return (current - mean) / effectiveStd;
         }
 
         // =============================================================
-        // EVENT RETENTION (SAFE LOG ROTATION)
+        // EVENT RETENTION
         // =============================================================
         private async Task PruneOldEventsAsync(
             EventsDbContext db,
             CancellationToken token)
         {
-            // Keep last 14 days of raw events
             var cutoff = DateTime.UtcNow.AddDays(-14);
 
             var oldEvents = await db.Events
@@ -499,6 +442,47 @@ namespace LightShield.Api.Services
                 cutoff);
         }
 
+        private async Task<double> UpdateHostRiskAsync(
+            EventsDbContext db,
+            string hostname,
+            double riskDelta,
+            CancellationToken token)
+        {
+            var now = DateTime.UtcNow;
 
+            var riskState = await db.HostRiskStates
+                .FirstOrDefaultAsync(h => h.Hostname == hostname, token);
+
+            if (riskState == null)
+            {
+                riskState = new HostRiskState
+                {
+                    Hostname = hostname,
+                    RiskScore = 0,
+                    LastUpdated = now
+                };
+                db.HostRiskStates.Add(riskState);
+            }
+
+            // --------------------------------------------
+            // Apply time decay
+            // --------------------------------------------
+            var minutesElapsed = (now - riskState.LastUpdated).TotalMinutes;
+
+            const double DECAY_PER_MINUTE = 1.0 / 30.0; // 1 point every 30 min
+            var decay = minutesElapsed * DECAY_PER_MINUTE;
+
+            riskState.RiskScore = Math.Max(0, riskState.RiskScore - decay);
+
+            // --------------------------------------------
+            // Apply new risk
+            // --------------------------------------------
+            riskState.RiskScore += riskDelta;
+            riskState.LastUpdated = now;
+
+            await db.SaveChangesAsync(token);
+
+            return riskState.RiskScore;
+        }
     }
 }

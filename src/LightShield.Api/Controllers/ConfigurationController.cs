@@ -21,6 +21,10 @@ namespace LightShield.Api.Controllers
         {
             public string PhoneNumber { get; set; } = "";
             public string Email { get; set; } = "";
+
+            // OPTIONAL
+            public string? TelegramBotToken { get; set; }
+            public string? TelegramChatId { get; set; }
         }
 
         // Defaults used only on first GET (no row yet)
@@ -31,7 +35,9 @@ namespace LightShield.Api.Controllers
             MaxFileCreates = 75,
             MaxFileModifies = 100,
             PhoneNumber = "",
-            Email = ""
+            Email = "",
+            TelegramBotToken = "",
+            TelegramChatId = ""
         };
 
         [HttpGet]
@@ -48,6 +54,8 @@ namespace LightShield.Api.Controllers
                     MaxFileModifies = Defaults.MaxFileModifies,
                     PhoneNumber = Defaults.PhoneNumber,
                     Email = Defaults.Email,
+                    TelegramBotToken = Defaults.TelegramBotToken,
+                    TelegramChatId = Defaults.TelegramChatId,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
@@ -82,6 +90,8 @@ namespace LightShield.Api.Controllers
                     MaxFileModifies = req.MaxFileModifies,
                     PhoneNumber = req.PhoneNumber ?? "",
                     Email = req.Email ?? "",
+                    TelegramBotToken = req.TelegramBotToken ?? "",
+                    TelegramChatId = req.TelegramChatId ?? "",
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
@@ -95,6 +105,8 @@ namespace LightShield.Api.Controllers
                 cfg.MaxFileModifies = req.MaxFileModifies;
                 cfg.PhoneNumber = req.PhoneNumber ?? "";
                 cfg.Email = req.Email ?? "";
+                cfg.TelegramBotToken = req.TelegramBotToken ?? "";
+                cfg.TelegramChatId = req.TelegramChatId ?? "";
                 cfg.UpdatedAt = DateTime.UtcNow;
             }
 
@@ -105,11 +117,13 @@ namespace LightShield.Api.Controllers
         [HttpPost]
         public async Task<IActionResult> Post([FromBody] ContactsRequest req)
         {
-            if (string.IsNullOrWhiteSpace(req.Email) || !new EmailAddressAttribute().IsValid(req.Email))
-                return BadRequest(new { error = "Invalid email address." });
+            if (string.IsNullOrWhiteSpace(req.Email) &&
+                string.IsNullOrWhiteSpace(req.PhoneNumber) &&
+                string.IsNullOrWhiteSpace(req.TelegramBotToken))
+            {
+                return BadRequest(new { error = "At least one alert channel must be provided." });
+            }
 
-            if (string.IsNullOrWhiteSpace(req.PhoneNumber) || !Regex.IsMatch(req.PhoneNumber, @"^\+\d{10,15}$"))
-                return BadRequest(new { error = "Phone must be E.164 (e.g. +15551234567)." });
 
             var cfg = await _db.Configurations.FirstOrDefaultAsync();
             if (cfg == null)
@@ -122,6 +136,8 @@ namespace LightShield.Api.Controllers
                     MaxFileModifies = 100,
                     PhoneNumber = req.PhoneNumber,
                     Email = req.Email,
+                    TelegramBotToken = req.TelegramBotToken,
+                    TelegramChatId = req.TelegramChatId,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
@@ -131,6 +147,8 @@ namespace LightShield.Api.Controllers
             {
                 cfg.PhoneNumber = req.PhoneNumber;
                 cfg.Email = req.Email;
+                cfg.TelegramBotToken = req.TelegramBotToken ?? "";
+                cfg.TelegramChatId = req.TelegramChatId ?? "";
                 cfg.UpdatedAt = DateTime.UtcNow;
             }
 
@@ -149,6 +167,8 @@ namespace LightShield.Api.Controllers
             MaxFileModifies = u.MaxFileModifies,
             PhoneNumber = u.PhoneNumber,
             Email = u.Email,
+            TelegramBotToken = u.TelegramBotToken,
+            TelegramChatId = u.TelegramChatId,
             CreatedAt = u.CreatedAt,
             UpdatedAt = u.UpdatedAt
         };

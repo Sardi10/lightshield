@@ -184,6 +184,27 @@ namespace LightShield.Api.Migrations
                     b.ToTable("FileActivityBaselines");
                 });
 
+            modelBuilder.Entity("LightShield.Api.Models.HostRiskState", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Hostname")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("LastUpdated")
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("RiskScore")
+                        .HasColumnType("REAL");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("HostRiskStates");
+                });
+
             modelBuilder.Entity("LightShield.Api.Models.IncidentState", b =>
                 {
                     b.Property<int>("Id")
@@ -248,6 +269,12 @@ namespace LightShield.Api.Migrations
 
                     b.Property<string>("PhoneNumber")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TelegramBotToken")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TelegramChatId")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("UpdatedAt")
