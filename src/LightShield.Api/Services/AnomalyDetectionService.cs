@@ -74,12 +74,12 @@ namespace LightShield.Api.Services
             var cutoff = DateTime.UtcNow.AddMinutes(-5);
 
             var events = await db.Events
-                .Where(e => e.Type == "failedlogin" && e.Timestamp >= cutoff)
+                .Where(e => e.Type == "loginfailure" && e.Timestamp >= cutoff)
                 .ToListAsync(token);
 
             const int THRESHOLD = 5;
 
-            var groupedByHost = events.GroupBy(e => e.Hostname).ToList();
+            var groupedByHost = events.GroupBy(e => e.Hostname);
 
             foreach (var group in groupedByHost)
             {
@@ -87,34 +87,43 @@ namespace LightShield.Api.Services
                 var count = group.Count();
                 var newestEventTime = group.Max(e => e.Timestamp);
 
-                var incident = await db.IncidentStates
-                    .FirstOrDefaultAsync(i =>
-                        i.Type == "FailedLoginBurst" &&
-                        i.Hostname == hostname,
-                        token);
+                if (count < THRESHOLD)
+                    continue;
 
-                if (count >= THRESHOLD)
+                
+                
+                bool alreadyReported = await db.Anomalies.AnyAsync(a =>
+                    a.Type == "FailedLoginBurst" &&
+                    a.Hostname == hostname &&
+                    a.Timestamp >= cutoff,
+                    token);
+
+                if (alreadyReported)
+                    continue;
+                
+
+                await db.Anomalies.AddAsync(new Anomaly
                 {
-                    await HandleIncidentAsync(
-                        db, alertWriter,
-                        hostname,
-                        "FailedLoginBurst",
-                        count,
-                        newestEventTime,
-                        token);
-                }
-                else if (incident != null && incident.IsActive)
-                {
-                    await CloseIncidentAsync(db, alertWriter, incident, token);
-                }
+                    Type = "FailedLoginBurst",
+                    Hostname = hostname,
+                    Timestamp = newestEventTime,
+                    Description = $"Failed login burst: {count} attempts in 5 minutes"
+                }, token);
+
+                await alertWriter.CreateAndSendAlertAsync(
+                    "FailedLoginBurst",
+                    $"Failed login burst detected on {hostname} ({count} attempts in 5 minutes)",
+                    hostname,
+                    "SINGLE");
+
+                _logger.LogWarning(
+                    "FAILED LOGIN BURST host={Host} count={Count}",
+                    hostname, count);
             }
 
-            await CloseMissingHostsAsync(
-                db, alertWriter,
-                "FailedLoginBurst",
-                groupedByHost.Select(g => g.Key).ToList(),
-                token);
+            await db.SaveChangesAsync(token);
         }
+
 
         // =============================================================
         // FILE TAMPER BURSTS

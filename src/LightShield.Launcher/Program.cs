@@ -1,46 +1,57 @@
 ﻿using System;
 using System.Diagnostics;
 using System.IO;
-using System.Threading;
 
 class Program
 {
+    static readonly string LogFile = @"C:\ProgramData\LightShield\launcher.log";
+
     static void Main()
     {
-        Console.WriteLine("[Launcher] Starting LightShield background services...");
+        Log("Launcher started");
 
-        string launcherDir = AppContext.BaseDirectory;
-        string rootDir = Path.GetFullPath(Path.Combine(launcherDir, ".."));
+        string exePath = Process.GetCurrentProcess().MainModule!.FileName!;
+        string launcherDir = Path.GetDirectoryName(exePath)!;
+        string rootDir = Directory.GetParent(launcherDir)!.FullName;
 
-        string apiPath = Path.Combine(rootDir, "api", "LightShield.Api.exe");
-        string agentPath = Path.Combine(rootDir, "agent", "LightShield.Agent.exe");
-        string parserPath = Path.Combine(rootDir, "logparser", "LightShield.LogParser.exe");
+        StartProcess(Path.Combine(rootDir, "api", "LightShield.Api.exe"), "API");
+        StartProcess(Path.Combine(rootDir, "agent", "LightShield.Agent.exe"), "Agent");
+        StartProcess(Path.Combine(rootDir, "logparser", "LightShield.LogParser.exe"), "LogParser");
 
-        StartProcess(apiPath, "API");
-        Thread.Sleep(1500);
-
-        StartProcess(agentPath, "Agent");
-        StartProcess(parserPath, "LogParser");
-
-        Console.WriteLine("[Launcher] Background services started.");
+        Log("Launcher finished");
     }
 
     static void StartProcess(string path, string name)
     {
         if (!File.Exists(path))
         {
-            Console.WriteLine($"[Launcher] ERROR: Cannot find {name} at: {path}");
+            Log($"ERROR: {name} not found at {path}");
             return;
         }
 
-        var psi = new ProcessStartInfo
+        try
         {
-            FileName = path,
-            WorkingDirectory = Path.GetDirectoryName(path),
-            UseShellExecute = true
-        };
+            var psi = new ProcessStartInfo
+            {
+                FileName = path,
+                WorkingDirectory = Path.GetDirectoryName(path)!,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
 
-        Process.Start(psi);
-        Console.WriteLine($"[Launcher] Started: {name}");
+            Process.Start(psi);
+            Log($"Started {name}");
+        }
+        catch (Exception ex)
+        {
+            Log($"FAILED {name}: {ex}");
+        }
+    }
+
+    static void Log(string msg)
+    {
+        Directory.CreateDirectory(@"C:\ProgramData\LightShield");
+        File.AppendAllText(LogFile, $"[{DateTime.Now}] {msg}{Environment.NewLine}");
     }
 }
