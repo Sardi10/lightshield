@@ -1,4 +1,4 @@
-# lightshield
+# LightShield
 
 Copyright 2025-2026 Sardi Kuka
 
