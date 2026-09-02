@@ -1,5 +1,6 @@
-﻿import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { apiFetch } from "../api";
 
 type Config = {
     id?: number;
@@ -31,17 +32,11 @@ export default function ConfigEditor() {
     useEffect(() => {
         (async () => {
             try {
-                const res = await fetch("http://localhost:5213/api/configuration");
+                const res = await apiFetch("/api/configuration");
                 if (!res.ok) throw new Error(`GET /api/configuration -> ${res.status}`);
                 const data = await res.json();
 
-                setCfg({
-                    ...data,
-                    email: data.Email ?? data.email ?? "",
-                    phoneNumber: data.PhoneNumber ?? data.phoneNumber ?? "",
-                    telegramBotToken: data.TelegramBotToken ?? data.telegramBotToken ?? "",
-                    telegramChatId: data.TelegramChatId ?? data.telegramChatId ?? "",
-                });
+                setCfg(data);
             } catch (e: unknown) {
                 setError(e instanceof Error ? e.message : "Failed to load configuration");
             } finally {
@@ -79,13 +74,17 @@ export default function ConfigEditor() {
         setSaving(true);
         try {
             const payload = {
+                maxFailedLogins: cfg.maxFailedLogins,
+                maxFileDeletes: cfg.maxFileDeletes,
+                maxFileCreates: cfg.maxFileCreates,
+                maxFileModifies: cfg.maxFileModifies,
                 email: cfg.email,
                 phoneNumber: cfg.phoneNumber,
                 telegramBotToken: cfg.telegramBotToken,
                 telegramChatId: cfg.telegramChatId,
             };
 
-            const res = await fetch("http://localhost:5213/api/configuration", {
+            const res = await apiFetch("/api/configuration", {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload),

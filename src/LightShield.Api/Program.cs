@@ -4,6 +4,8 @@ using LightShield.Api.Services.Alerts;
 using Microsoft.EntityFrameworkCore;
 using System.Reflection;
 using DotNetEnv;
+using LightShield.Api.Security;
+using System.Text.Json;
 
 // ===================================================================
 //  Load Embedded .env
@@ -76,19 +78,21 @@ builder.Services.AddHostedService<AnomalyDetectionService>();
 builder.Services.AddScoped<ConfigurationService>();
 
 builder.Services.AddScoped<FileBaselineService>();
+builder.Services.AddSingleton<ApiKeyProvider>();
 
 builder.Services.AddControllers().AddJsonOptions(options =>
 {
-    options.JsonSerializerOptions.PropertyNamingPolicy = null;
+    options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
 });
 
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.AllowAnyHeader()
+        policy.WithOrigins("tauri://localhost", "http://tauri.localhost", "https://tauri.localhost", "http://localhost:5173")
+              .WithHeaders("Content-Type", ApiKeyProvider.HeaderName)
               .AllowAnyMethod()
-              .AllowAnyOrigin();
+              .SetPreflightMaxAge(TimeSpan.FromHours(1));
     });
 });
 
@@ -99,6 +103,9 @@ builder.Services.AddEndpointsApiExplorer();
 // ===================================================================
 
 var app = builder.Build();
+
+// Create the shared local credential before collectors or the desktop attempt to read it.
+_ = app.Services.GetRequiredService<ApiKeyProvider>();
 
 // Run DB migrations
 using (var scope = app.Services.CreateScope())
@@ -111,5 +118,22 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseCors();
+app.Use(async (context, next) =>
+{
+    if (HttpMethods.IsOptions(context.Request.Method))
+    {
+        await next();
+        return;
+    }
+    var apiKeyProvider = context.RequestServices.GetRequiredService<ApiKeyProvider>();
+    var candidate = context.Request.Headers[ApiKeyProvider.HeaderName].FirstOrDefault();
+    if (!apiKeyProvider.IsValid(candidate))
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await context.Response.WriteAsJsonAsync(new { error = "A valid LightShield API credential is required." });
+        return;
+    }
+    await next();
+});
 app.MapControllers();
 app.Run();

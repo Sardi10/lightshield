@@ -9,7 +9,12 @@ namespace LightShield.Common.Api
     {
         public static Dictionary<string, string> LoadConfig()
         {
-            var path = Path.Combine(AppContext.BaseDirectory, "lightshield_config.json");
+            var globalPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "LightShield",
+                "lightshield_config.json");
+            var localPath = Path.Combine(AppContext.BaseDirectory, "lightshield_config.json");
+            var path = File.Exists(globalPath) ? globalPath : localPath;
 
             if (!File.Exists(path))
                 throw new FileNotFoundException($"Missing config file: {path}");

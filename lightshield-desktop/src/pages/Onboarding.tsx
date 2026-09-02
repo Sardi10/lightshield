@@ -1,5 +1,6 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { apiFetch } from "../api";
 
 export default function Onboarding() {
     const [phone, setPhone] = useState("");
@@ -31,7 +32,7 @@ export default function Onboarding() {
         setLoading(true);
 
         try {
-            const res = await fetch("http://localhost:5213/api/configuration", {
+            const res = await apiFetch("/api/configuration", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({

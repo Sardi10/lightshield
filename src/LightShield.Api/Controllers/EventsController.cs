@@ -11,6 +11,7 @@ using LightShield.Api.Services.Alerts;
 using LightShield.Api.Services;
 using Newtonsoft.Json;
 using System.Net.Http;
+using LightShield.Api.Dtos;
 
 namespace LightShield.Api.Controllers
 {
@@ -40,33 +41,21 @@ namespace LightShield.Api.Controllers
         // POST /api/events
         // ======================================================================
         [HttpPost]
-        public async Task<IActionResult> Post([FromBody] Event evt)
+        public async Task<IActionResult> Post([FromBody] EventIngestDto request)
         {
-            evt.Timestamp = DateTime.UtcNow; // store in UTC
-            evt.Type = (evt.Type ?? "").Trim().ToLowerInvariant();
-
-            // Normalize file operation types
-            if (evt.Type == "filecreate")
+            var evt = new Event
             {
-                evt.Type = "filecreate";
-            }
-            else if (evt.Type == "filemodify")
-            {
-                evt.Type = "filemodify";
-            }
-            else if (evt.Type == "filedelete")
-            {
-                evt.Type = "filedelete";
-            }
-            else if (evt.Type == "filerename")
-            {
-                // Renames are used for encryption detection
-                evt.Type = "filerename";
-            }
-            
-
-            evt.OperatingSystem = evt.OperatingSystem?.ToLower() ?? "unknown";
-
+                Timestamp = DateTime.UtcNow,
+                Source = request.Source.Trim().ToLowerInvariant(),
+                Type = request.Type.Trim().ToLowerInvariant(),
+                PathOrMessage = request.PathOrMessage.Trim(),
+                Hostname = request.Hostname.Trim(),
+                OperatingSystem = request.OperatingSystem.Trim().ToLowerInvariant(),
+                EventId = request.EventId,
+                LogonType = request.LogonType,
+                Username = string.IsNullOrWhiteSpace(request.Username) ? null : request.Username.Trim(),
+                IPAddress = string.IsNullOrWhiteSpace(request.IPAddress) ? null : request.IPAddress.Trim()
+            };
 
             evt.Severity = ClassifySeverity(evt);
             await TryGeoEnrich(evt);

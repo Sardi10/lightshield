@@ -44,21 +44,27 @@ namespace LightShield.LogParser
         // ------------------------------------------------------------
         static void InitializeApi()
         {
-            try
+            for (var attempt = 1; attempt <= 30; attempt++)
             {
-                var cfg = ConfigLoader.LoadConfig();
-                var apiUrl = cfg["apiUrl"];
-
-                if (string.IsNullOrWhiteSpace(apiUrl))
-                    throw new Exception("apiUrl missing from config");
-
-                apiClient = new LightShieldApiClient(new HttpClient(), apiUrl);
-                Log($"API client initialized: {apiUrl}");
+                try
+                {
+                    var cfg = ConfigLoader.LoadConfig();
+                    var apiUrl = cfg["apiUrl"];
+                    if (string.IsNullOrWhiteSpace(apiUrl))
+                        throw new Exception("apiUrl missing from config");
+                    if (!cfg.TryGetValue("apiKey", out var apiKey) || string.IsNullOrWhiteSpace(apiKey))
+                        throw new Exception("apiKey missing from config");
+                    apiClient = new LightShieldApiClient(new HttpClient(), apiUrl, apiKey);
+                    Log($"API client initialized: {apiUrl}");
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    Log($"API init attempt {attempt}/30 failed: {ex.Message}");
+                    if (attempt < 30) Thread.Sleep(TimeSpan.FromSeconds(1));
+                }
             }
-            catch (Exception ex)
-            {
-                Log("API init failed: " + ex);
-            }
+            Log("API initialization exhausted all retries; telemetry delivery is disabled.");
         }
 
         // ------------------------------------------------------------

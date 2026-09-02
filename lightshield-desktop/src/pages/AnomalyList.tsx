@@ -1,4 +1,5 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { apiFetch } from "../api";
 
 export default function AnomalyList() {
     const [anomalies, setAnomalies] = useState([]);
@@ -37,9 +38,7 @@ export default function AnomalyList() {
         if (endDate) params.append("endDate", endDate);
 
         try {
-            const res = await fetch(
-                `http://localhost:5213/api/anomalies?${params.toString()}`
-            );
+            const res = await apiFetch(`/api/anomalies?${params.toString()}`);
             const data = await res.json();
 
             // Update pagination safely

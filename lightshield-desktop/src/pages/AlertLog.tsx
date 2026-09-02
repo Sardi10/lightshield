@@ -1,12 +1,13 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { apiFetch } from "../api";
 
 interface AlertLogEntry {
-    Id: number;
-    Timestamp: string;
-    Type: string;
-    Message: string;
-    Channel: string;
-    Hostname: string;
+    id: number;
+    timestamp: string;
+    type: string;
+    message: string;
+    channel: string;
+    hostname: string;
 }
 
 export default function AlertLog() {
@@ -46,9 +47,7 @@ export default function AlertLog() {
         if (endDate) params.append("endDate", endDate);
 
         try {
-            const res = await fetch(
-                `http://localhost:5213/api/alerts?${params.toString()}`
-            );
+            const res = await apiFetch(`/api/alerts?${params.toString()}`);
 
             const data = await res.json();
             const newTotalPages = Math.ceil(data.totalCount / pageSize);
@@ -198,14 +197,14 @@ export default function AlertLog() {
 
                     <tbody>
                         {alerts.map((a) => (
-                            <tr key={a.Id} className="border-b hover:bg-blue-50 transition">
+                            <tr key={a.id} className="border-b hover:bg-blue-50 transition">
                                 <td className="px-4 py-2">
-                                    {new Date(a.Timestamp).toLocaleString()}
+                                    {new Date(a.timestamp).toLocaleString()}
                                 </td>
-                                <td className="px-4 py-2">{a.Type}</td>
-                                <td className="px-4 py-2">{a.Channel}</td>
-                                <td className="px-4 py-2">{a.Hostname}</td>
-                                <td className="px-4 py-2">{a.Message}</td>
+                                <td className="px-4 py-2">{a.type}</td>
+                                <td className="px-4 py-2">{a.channel}</td>
+                                <td className="px-4 py-2">{a.hostname}</td>
+                                <td className="px-4 py-2">{a.message}</td>
                             </tr>
                         ))}
                     </tbody>

@@ -11,10 +11,11 @@ namespace LightShield.Common.Api
         private readonly HttpClient _http;
         private readonly string _eventsEndpoint;
 
-        public LightShieldApiClient(HttpClient http, string baseUrl)
+        public LightShieldApiClient(HttpClient http, string baseUrl, string apiKey)
         {
             _http = http;
             _eventsEndpoint = $"{baseUrl.TrimEnd('/')}/api/events";
+            _http.DefaultRequestHeaders.Add("X-LightShield-Api-Key", apiKey);
         }
 
         public async Task<bool> PostEventAsync(Event evt)

@@ -66,7 +66,7 @@ namespace LightShield.Api.Controllers
         }
 
         [HttpPut]
-        public async Task<ActionResult<ConfigurationDto>> Put([FromBody] ConfigurationDto req)
+        public async Task<ActionResult<ConfigurationDto>> Put([FromBody] ConfigurationUpdateDto req)
         {
             // validate thresholds
             if (req.MaxFailedLogins < 0 || req.MaxFileDeletes < 0 || req.MaxFileCreates < 0 || req.MaxFileModifies < 0)
@@ -84,10 +84,10 @@ namespace LightShield.Api.Controllers
             {
                 cfg = new UserConfiguration
                 {
-                    MaxFailedLogins = req.MaxFailedLogins,
-                    MaxFileDeletes = req.MaxFileDeletes,
-                    MaxFileCreates = req.MaxFileCreates,
-                    MaxFileModifies = req.MaxFileModifies,
+                    MaxFailedLogins = req.MaxFailedLogins ?? Defaults.MaxFailedLogins,
+                    MaxFileDeletes = req.MaxFileDeletes ?? Defaults.MaxFileDeletes,
+                    MaxFileCreates = req.MaxFileCreates ?? Defaults.MaxFileCreates,
+                    MaxFileModifies = req.MaxFileModifies ?? Defaults.MaxFileModifies,
                     PhoneNumber = req.PhoneNumber ?? "",
                     Email = req.Email ?? "",
                     TelegramBotToken = req.TelegramBotToken ?? "",
@@ -99,14 +99,14 @@ namespace LightShield.Api.Controllers
             }
             else
             {
-                cfg.MaxFailedLogins = req.MaxFailedLogins;
-                cfg.MaxFileDeletes = req.MaxFileDeletes;
-                cfg.MaxFileCreates = req.MaxFileCreates;
-                cfg.MaxFileModifies = req.MaxFileModifies;
-                cfg.PhoneNumber = req.PhoneNumber ?? "";
-                cfg.Email = req.Email ?? "";
-                cfg.TelegramBotToken = req.TelegramBotToken ?? "";
-                cfg.TelegramChatId = req.TelegramChatId ?? "";
+                if (req.MaxFailedLogins.HasValue) cfg.MaxFailedLogins = req.MaxFailedLogins.Value;
+                if (req.MaxFileDeletes.HasValue) cfg.MaxFileDeletes = req.MaxFileDeletes.Value;
+                if (req.MaxFileCreates.HasValue) cfg.MaxFileCreates = req.MaxFileCreates.Value;
+                if (req.MaxFileModifies.HasValue) cfg.MaxFileModifies = req.MaxFileModifies.Value;
+                if (req.PhoneNumber is not null) cfg.PhoneNumber = req.PhoneNumber;
+                if (req.Email is not null) cfg.Email = req.Email;
+                if (req.TelegramBotToken is not null) cfg.TelegramBotToken = req.TelegramBotToken;
+                if (req.TelegramChatId is not null) cfg.TelegramChatId = req.TelegramChatId;
                 cfg.UpdatedAt = DateTime.UtcNow;
             }
 

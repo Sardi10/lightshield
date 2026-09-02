@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { apiFetch } from "../api";
 
 export default function StartupGate() {
     const navigate = useNavigate();
@@ -7,7 +8,7 @@ export default function StartupGate() {
     useEffect(() => {
         const checkConfig = async () => {
             try {
-                const res = await fetch("http://localhost:5213/api/configuration");
+                const res = await apiFetch("/api/configuration");
 
                 if (!res.ok) {
                     navigate("/onboarding");
@@ -16,11 +17,11 @@ export default function StartupGate() {
 
                 const data = await res.json();
 
-                // Backend DTO uses PascalCase
-                const email = data?.Email;
-                const phone = data?.PhoneNumber;
+                const email = data?.email;
+                const phone = data?.phoneNumber;
+                const telegram = data?.telegramBotToken && data?.telegramChatId;
 
-                if (email && phone) {
+                if (email || phone || telegram) {
                     navigate("/dashboard");
                 } else {
                     navigate("/onboarding");
@@ -37,7 +38,7 @@ export default function StartupGate() {
 
     return (
         <div className="min-h-screen flex items-center justify-center text-gray-500">
-            Loading LightShield…
+            Loading LightShieldâ€¦
         </div>
     );
 }

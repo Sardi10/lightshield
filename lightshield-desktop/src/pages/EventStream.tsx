@@ -1,4 +1,5 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { apiFetch } from "../api";
 
 // --------------------------------------------------------------------
 // FIX: Normalize timestamps before Date parsing
@@ -45,9 +46,7 @@ export default function EventStream() {
         if (endDate) params.append("endDate", endDate);
 
         try {
-            const res = await fetch(
-                `http://localhost:5213/api/events?${params.toString()}`
-            );
+            const res = await apiFetch(`/api/events?${params.toString()}`);
             const data = await res.json();
 
             // SAFE pagination update
@@ -62,7 +61,7 @@ export default function EventStream() {
             // FIX: Normalize timestamps and store items
             const normalized = data.items.map((e) => ({
                 ...e,
-                Timestamp: normalizeTimestamp(e.Timestamp),
+                timestamp: normalizeTimestamp(e.timestamp),
             }));
 
             setEvents(normalized);
@@ -281,20 +280,20 @@ export default function EventStream() {
 
                     <tbody>
                         {events.map((e) => (
-                            <tr key={e.Id} className="border-b hover:bg-blue-50 transition">
+                            <tr key={e.id} className="border-b hover:bg-blue-50 transition">
                                 <td className="px-4 py-2">
-                                    {new Date(e.Timestamp).toLocaleString()}
+                                    {new Date(e.timestamp).toLocaleString()}
                                 </td>
-                                <td className="px-4 py-2">{e.Hostname}</td>
-                                <td className="px-4 py-2">{e.Type}</td>
-                                <td className="px-4 py-2 align-middle">{severityBadge(e.Severity)}</td>
-                                <td className="px-4 py-2 align-middle">{osBadge(e.OperatingSystem)}</td>
-                                <td className="px-4 py-2">{e.Username || "-"}</td>
-                                <td className="px-4 py-2">{e.IPAddress || "-"}</td>
+                                <td className="px-4 py-2">{e.hostname}</td>
+                                <td className="px-4 py-2">{e.type}</td>
+                                <td className="px-4 py-2 align-middle">{severityBadge(e.severity)}</td>
+                                <td className="px-4 py-2 align-middle">{osBadge(e.operatingSystem)}</td>
+                                <td className="px-4 py-2">{e.username || "-"}</td>
+                                <td className="px-4 py-2">{e.ipAddress || "-"}</td>
                                 <td className="px-4 py-2">
-                                    {e.Country ? `${e.City}, ${e.Country}` : "-"}
+                                    {e.country ? `${e.city}, ${e.country}` : "-"}
                                 </td>
-                                <td className="px-4 py-2">{e.Message}</td>
+                                <td className="px-4 py-2">{e.message}</td>
                             </tr>
                         ))}
                     </tbody>
