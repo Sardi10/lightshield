@@ -9,8 +9,6 @@ using LightShield.Api.Data;
 using LightShield.Api.Models;
 using LightShield.Api.Services.Alerts;
 using LightShield.Api.Services;
-using Newtonsoft.Json;
-using System.Net.Http;
 using LightShield.Api.Dtos;
 
 namespace LightShield.Api.Controllers
@@ -23,18 +21,20 @@ namespace LightShield.Api.Controllers
         private readonly AlertWriterService _alertWriter;
         private readonly ILogger<EventsController> _logger;
         private readonly ConfigurationService _configService;
-        private static readonly HttpClient _http = new HttpClient();
+        private readonly GeoIpService _geoIpService;
 
         public EventsController(
             EventsDbContext db,
             AlertWriterService alertWriter,
             ConfigurationService configService,
+            GeoIpService geoIpService,
             ILogger<EventsController> logger)
         {
             _db = db;
             _alertWriter = alertWriter;
             _logger = logger;
             _configService = configService;
+            _geoIpService = geoIpService;
         }
 
         // ======================================================================
@@ -58,7 +58,12 @@ namespace LightShield.Api.Controllers
             };
 
             evt.Severity = ClassifySeverity(evt);
-            await TryGeoEnrich(evt);
+            var location = await _geoIpService.LookupAsync(evt.IPAddress, HttpContext.RequestAborted);
+            if (location != null)
+            {
+                evt.Country = location.Country;
+                evt.City = location.City;
+            }
 
             _db.Events.Add(evt);
             await _db.SaveChangesAsync();
@@ -186,32 +191,6 @@ namespace LightShield.Api.Controllers
             return "Info";
         }
 
-
-        // ======================================================================
-        // Geo Enrichment (safe if offline)
-        // ======================================================================
-        private async Task TryGeoEnrich(Event evt)
-        {
-            if (string.IsNullOrWhiteSpace(evt.IPAddress))
-                return;
-
-            try
-            {
-                string url = $"http://ip-api.com/json/{evt.IPAddress}";
-                string json = await _http.GetStringAsync(url);
-                dynamic data = JsonConvert.DeserializeObject(json)!;
-
-                if (data.status == "success")
-                {
-                    evt.Country = data.country;
-                    evt.City = data.city;
-                }
-            }
-            catch
-            {
-                // Offline or DNS fail: silently skip
-            }
-        }
 
         // ======================================================================
         // Threshold Alerts → Create Anomaly → Create Alert (UNIFIED)

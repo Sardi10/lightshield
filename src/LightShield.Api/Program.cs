@@ -2,34 +2,9 @@
 using LightShield.Api.Services;
 using LightShield.Api.Services.Alerts;
 using Microsoft.EntityFrameworkCore;
-using System.Reflection;
-using DotNetEnv;
 using LightShield.Api.Security;
 using System.Text.Json;
-
-// ===================================================================
-//  Load Embedded .env
-// ===================================================================
-
-var assembly = Assembly.GetExecutingAssembly();
-
-// IMPORTANT: list all embedded resources to confirm name
-Console.WriteLine("Embedded resources:");
-foreach (var r in assembly.GetManifestResourceNames())
-    Console.WriteLine(" - " + r);
-
-// The correct name will be "LightShield.Api._env" for a file named ".env" . 
-var resource = assembly.GetManifestResourceStream("LightShield.Api..env");
-
-if (resource == null)
-{
-    Console.WriteLine("ERROR: Embedded .env NOT FOUND!");
-}
-else
-{
-    Env.Load(resource);
-    Console.WriteLine("Loaded embedded .env");
-}
+using Microsoft.AspNetCore.DataProtection;
 
 // ===================================================================
 //  Configure ProgramData Database Path
@@ -69,6 +44,8 @@ builder.Services.AddScoped<SmtpAlertService>();
 builder.Services.AddScoped<IAlertService, CompositeAlertService>();
 builder.Services.AddScoped<AlertWriterService>();
 builder.Services.AddHttpClient();
+builder.Services.AddHttpClient("GeoIp", client => client.Timeout = TimeSpan.FromSeconds(2));
+builder.Services.AddMemoryCache(options => options.SizeLimit = 10_000);
 
 
 // Background anomaly detection
@@ -79,6 +56,12 @@ builder.Services.AddScoped<ConfigurationService>();
 
 builder.Services.AddScoped<FileBaselineService>();
 builder.Services.AddSingleton<ApiKeyProvider>();
+builder.Services.AddSingleton<SecretProtector>();
+builder.Services.AddSingleton<GeoIpService>();
+builder.Services.AddDataProtection()
+    .SetApplicationName("LightShield")
+    .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(dataDir, "keys")))
+    .ProtectKeysWithDpapi(protectToLocalMachine: true);
 
 builder.Services.AddControllers().AddJsonOptions(options =>
 {
@@ -112,6 +95,17 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<EventsDbContext>();
     db.Database.Migrate();
+
+    var secretProtector = scope.ServiceProvider.GetRequiredService<SecretProtector>();
+    var configuration = db.Configurations.FirstOrDefault();
+    if (configuration != null &&
+        (secretProtector.NeedsProtection(configuration.TelegramBotToken) ||
+         secretProtector.NeedsProtection(configuration.TelegramChatId)))
+    {
+        configuration.TelegramBotToken = secretProtector.Protect(configuration.TelegramBotToken);
+        configuration.TelegramChatId = secretProtector.Protect(configuration.TelegramChatId);
+        db.SaveChanges();
+    }
 
     db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
     db.Database.ExecuteSqlRaw("PRAGMA wal_checkpoint(TRUNCATE);");

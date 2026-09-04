@@ -7,6 +7,7 @@ using LightShield.Api.Dtos;
 using LightShield.Api.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using LightShield.Api.Security;
 
 namespace LightShield.Api.Controllers
 {
@@ -15,7 +16,12 @@ namespace LightShield.Api.Controllers
     public class ConfigurationController : ControllerBase
     {
         private readonly EventsDbContext _db;
-        public ConfigurationController(EventsDbContext db) => _db = db;
+        private readonly SecretProtector _secretProtector;
+        public ConfigurationController(EventsDbContext db, SecretProtector secretProtector)
+        {
+            _db = db;
+            _secretProtector = secretProtector;
+        }
 
         public class ContactsRequest
         {
@@ -90,8 +96,8 @@ namespace LightShield.Api.Controllers
                     MaxFileModifies = req.MaxFileModifies ?? Defaults.MaxFileModifies,
                     PhoneNumber = req.PhoneNumber ?? "",
                     Email = req.Email ?? "",
-                    TelegramBotToken = req.TelegramBotToken ?? "",
-                    TelegramChatId = req.TelegramChatId ?? "",
+                    TelegramBotToken = _secretProtector.Protect(req.TelegramBotToken),
+                    TelegramChatId = _secretProtector.Protect(req.TelegramChatId),
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
@@ -105,8 +111,8 @@ namespace LightShield.Api.Controllers
                 if (req.MaxFileModifies.HasValue) cfg.MaxFileModifies = req.MaxFileModifies.Value;
                 if (req.PhoneNumber is not null) cfg.PhoneNumber = req.PhoneNumber;
                 if (req.Email is not null) cfg.Email = req.Email;
-                if (req.TelegramBotToken is not null) cfg.TelegramBotToken = req.TelegramBotToken;
-                if (req.TelegramChatId is not null) cfg.TelegramChatId = req.TelegramChatId;
+                if (req.TelegramBotToken is not null) cfg.TelegramBotToken = _secretProtector.Protect(req.TelegramBotToken);
+                if (req.TelegramChatId is not null) cfg.TelegramChatId = _secretProtector.Protect(req.TelegramChatId);
                 cfg.UpdatedAt = DateTime.UtcNow;
             }
 
@@ -136,8 +142,8 @@ namespace LightShield.Api.Controllers
                     MaxFileModifies = 100,
                     PhoneNumber = req.PhoneNumber,
                     Email = req.Email,
-                    TelegramBotToken = req.TelegramBotToken,
-                    TelegramChatId = req.TelegramChatId,
+                    TelegramBotToken = _secretProtector.Protect(req.TelegramBotToken),
+                    TelegramChatId = _secretProtector.Protect(req.TelegramChatId),
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
@@ -147,8 +153,8 @@ namespace LightShield.Api.Controllers
             {
                 cfg.PhoneNumber = req.PhoneNumber;
                 cfg.Email = req.Email;
-                cfg.TelegramBotToken = req.TelegramBotToken ?? "";
-                cfg.TelegramChatId = req.TelegramChatId ?? "";
+                cfg.TelegramBotToken = _secretProtector.Protect(req.TelegramBotToken);
+                cfg.TelegramChatId = _secretProtector.Protect(req.TelegramChatId);
                 cfg.UpdatedAt = DateTime.UtcNow;
             }
 
@@ -158,7 +164,7 @@ namespace LightShield.Api.Controllers
             return Ok(new { message = "Configuration saved successfully." });
         }
 
-        private static ConfigurationDto ToDto(UserConfiguration u) => new()
+        private ConfigurationDto ToDto(UserConfiguration u) => new()
         {
             Id = u.Id,
             MaxFailedLogins = u.MaxFailedLogins,
@@ -167,8 +173,8 @@ namespace LightShield.Api.Controllers
             MaxFileModifies = u.MaxFileModifies,
             PhoneNumber = u.PhoneNumber,
             Email = u.Email,
-            TelegramBotToken = u.TelegramBotToken,
-            TelegramChatId = u.TelegramChatId,
+            TelegramBotToken = _secretProtector.Unprotect(u.TelegramBotToken),
+            TelegramChatId = _secretProtector.Unprotect(u.TelegramChatId),
             CreatedAt = u.CreatedAt,
             UpdatedAt = u.UpdatedAt
         };

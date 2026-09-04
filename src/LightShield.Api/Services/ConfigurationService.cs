@@ -1,6 +1,7 @@
 using LightShield.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using LightShield.Api.Models;
+using LightShield.Api.Security;
 
 
 namespace LightShield.Api.Services
@@ -11,10 +12,12 @@ namespace LightShield.Api.Services
     public class ConfigurationService
     {
         private readonly EventsDbContext _db;
+        private readonly SecretProtector _secretProtector;
 
-        public ConfigurationService(EventsDbContext db)
+        public ConfigurationService(EventsDbContext db, SecretProtector secretProtector)
         {
             _db = db;
+            _secretProtector = secretProtector;
         }
 
         private async Task<UserConfiguration?> GetConfigAsync()
@@ -63,13 +66,13 @@ namespace LightShield.Api.Services
         public async Task<string?> GetTelegramBotTokenAsync()
         {
             var cfg = await _db.Set<UserConfiguration>().FirstOrDefaultAsync();
-            return cfg?.TelegramBotToken;
+            return _secretProtector.Unprotect(cfg?.TelegramBotToken);
         }
 
         public async Task<string?> GetTelegramChatIdAsync()
         {
             var cfg = await _db.Set<UserConfiguration>().FirstOrDefaultAsync();
-            return cfg?.TelegramChatId;
+            return _secretProtector.Unprotect(cfg?.TelegramChatId);
         }
 
 
