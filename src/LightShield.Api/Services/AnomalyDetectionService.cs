@@ -70,6 +70,7 @@ namespace LightShield.Api.Services
             using var scope = _services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<EventsDbContext>();
             var alertWriter = scope.ServiceProvider.GetRequiredService<AlertWriterService>();
+            var configuration = scope.ServiceProvider.GetRequiredService<ConfigurationService>();
 
             var cutoff = DateTime.UtcNow.AddMinutes(-5);
 
@@ -77,7 +78,7 @@ namespace LightShield.Api.Services
                 .Where(e => e.Type == "loginfailure" && e.Timestamp >= cutoff)
                 .ToListAsync(token);
 
-            const int THRESHOLD = 5;
+            var threshold = Math.Max(1, await configuration.GetFailedLoginThresholdAsync());
 
             var groupedByHost = events.GroupBy(e => e.Hostname);
 
@@ -87,7 +88,7 @@ namespace LightShield.Api.Services
                 var count = group.Count();
                 var newestEventTime = group.Max(e => e.Timestamp);
 
-                if (count < THRESHOLD)
+                if (count < threshold)
                     continue;
 
                 
@@ -107,12 +108,12 @@ namespace LightShield.Api.Services
                     Type = "FailedLoginBurst",
                     Hostname = hostname,
                     Timestamp = newestEventTime,
-                    Description = $"Failed login burst: {count} attempts in 5 minutes"
+                    Description = $"Failed login burst: {count} attempts in 5 minutes (threshold: {threshold})"
                 }, token);
 
                 await alertWriter.CreateAndSendAlertAsync(
                     "FailedLoginBurst",
-                    $"Failed login burst detected on {hostname} ({count} attempts in 5 minutes)",
+                    $"Failed login burst detected on {hostname} ({count} attempts in 5 minutes; threshold: {threshold})",
                     hostname,
                     "SINGLE");
 
@@ -133,6 +134,11 @@ namespace LightShield.Api.Services
             using var scope = _services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<EventsDbContext>();
             var alertWriter = scope.ServiceProvider.GetRequiredService<AlertWriterService>();
+            var configuration = scope.ServiceProvider.GetRequiredService<ConfigurationService>();
+
+            var createThreshold = Math.Max(1, await configuration.GetFileCreateThresholdAsync());
+            var modifyThreshold = Math.Max(1, await configuration.GetFileEditThresholdAsync());
+            var deleteThreshold = Math.Max(1, await configuration.GetFileDeleteThresholdAsync());
 
             var cutoff = DateTime.UtcNow.AddMinutes(-5);
 
@@ -204,9 +210,9 @@ namespace LightShield.Api.Services
                 // -------------------------------------------------
                 double cycleRiskDelta = 0;
 
-                if (zCreate >= FILE_Z_THRESHOLD) cycleRiskDelta += 1.0;
-                if (zModify >= FILE_Z_THRESHOLD) cycleRiskDelta += 1.0;
-                if (zDelete >= FILE_Z_THRESHOLD) cycleRiskDelta += 3.0;
+                if (zCreate >= FILE_Z_THRESHOLD || creates >= createThreshold) cycleRiskDelta += 1.0;
+                if (zModify >= FILE_Z_THRESHOLD || modifies >= modifyThreshold) cycleRiskDelta += 1.0;
+                if (zDelete >= FILE_Z_THRESHOLD || deletes >= deleteThreshold) cycleRiskDelta += 3.0;
                 if (zRename >= FILE_Z_THRESHOLD) cycleRiskDelta += 4.0;
 
                 // -------------------------------------------------
@@ -250,11 +256,10 @@ namespace LightShield.Api.Services
                 }
             }
 
-            await CloseMissingHostsAsync(
+            await CloseInactiveIncidentsAsync(
                 db,
                 alertWriter,
                 "File",
-                groupedByHost.Select(g => g.Key).ToList(),
                 token);
         }
 
@@ -375,13 +380,12 @@ namespace LightShield.Api.Services
         }
 
         // =============================================================
-        // CLOSE INCIDENTS FOR HOSTS WITH ZERO EVENTS
+        // CLOSE INCIDENTS AFTER TRUE EVENT INACTIVITY
         // =============================================================
-        private async Task CloseMissingHostsAsync(
+        private async Task CloseInactiveIncidentsAsync(
             EventsDbContext db,
             AlertWriterService alertWriter,
             string typePrefix,
-            System.Collections.Generic.List<string> activeHosts,
             CancellationToken token)
         {
             var now = DateTime.UtcNow;
@@ -396,8 +400,7 @@ namespace LightShield.Api.Services
 
             foreach (var incident in activeIncidents)
             {
-                if (!activeHosts.Contains(incident.Hostname) &&
-                    incident.LastEventTime < now.AddSeconds(-15))
+                if (incident.LastEventTime < now.AddSeconds(-15))
                 {
                     await CloseIncidentAsync(db, alertWriter, incident, token);
                 }

@@ -75,8 +75,9 @@ namespace LightShield.Api.Controllers
         public async Task<ActionResult<ConfigurationDto>> Put([FromBody] ConfigurationUpdateDto req)
         {
             // validate thresholds
-            if (req.MaxFailedLogins < 0 || req.MaxFileDeletes < 0 || req.MaxFileCreates < 0 || req.MaxFileModifies < 0)
-                return BadRequest("Thresholds must be non-negative.");
+            if (req.MaxFailedLogins is <= 0 || req.MaxFileDeletes is <= 0 ||
+                req.MaxFileCreates is <= 0 || req.MaxFileModifies is <= 0)
+                return BadRequest("Thresholds must be greater than zero.");
 
             // validate contacts if present
             if (!string.IsNullOrWhiteSpace(req.Email) && !new EmailAddressAttribute().IsValid(req.Email))

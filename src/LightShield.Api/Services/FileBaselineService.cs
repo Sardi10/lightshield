@@ -19,9 +19,10 @@ namespace LightShield.Api.Services
 
         public async Task UpdateBaselinesAsync(CancellationToken token)
         {
-            // Learn from past behavior ONLY
-            var baselineWindowStart = DateTime.UtcNow.AddHours(-6);
-            var baselineWindowEnd = DateTime.UtcNow.AddMinutes(-5);
+            // Learn from complete historical minute buckets and exclude current activity.
+            var now = DateTime.UtcNow;
+            var baselineWindowStart = FloorToMinute(now.AddHours(-6));
+            var baselineWindowEnd = FloorToMinute(now.AddMinutes(-5));
 
             var events = await _db.Events
                 .Where(e =>
@@ -34,19 +35,35 @@ namespace LightShield.Api.Services
                 .ToListAsync(token);
 
             var groupedByHost = events.GroupBy(e => e.Hostname);
+            var bucketCount = (int)(baselineWindowEnd - baselineWindowStart).TotalMinutes;
+            if (bucketCount < 60) return;
 
             foreach (var hostGroup in groupedByHost)
             {
                 var hostname = hostGroup.Key;
 
-                double minutes = (baselineWindowEnd - baselineWindowStart).TotalMinutes;
-                if (minutes <= 0)
-                    continue;
+                var createBuckets = new double[bucketCount];
+                var modifyBuckets = new double[bucketCount];
+                var deleteBuckets = new double[bucketCount];
+                var renameBuckets = new double[bucketCount];
 
-                double createRate = hostGroup.Count(e => e.Type == "filecreate") / minutes;
-                double modifyRate = hostGroup.Count(e => e.Type == "filemodify") / minutes;
-                double deleteRate = hostGroup.Count(e => e.Type == "filedelete") / minutes;
-                double renameRate = hostGroup.Count(e => e.Type == "filerename") / minutes;
+                foreach (var evt in hostGroup)
+                {
+                    var index = (int)(FloorToMinute(evt.Timestamp) - baselineWindowStart).TotalMinutes;
+                    if (index < 0 || index >= bucketCount) continue;
+                    switch (evt.Type)
+                    {
+                        case "filecreate": createBuckets[index]++; break;
+                        case "filemodify": modifyBuckets[index]++; break;
+                        case "filedelete": deleteBuckets[index]++; break;
+                        case "filerename": renameBuckets[index]++; break;
+                    }
+                }
+
+                var createStats = RobustStats(createBuckets);
+                var modifyStats = RobustStats(modifyBuckets);
+                var deleteStats = RobustStats(deleteBuckets);
+                var renameStats = RobustStats(renameBuckets);
 
                 var baseline = await _db.FileActivityBaselines
                     .FirstOrDefaultAsync(b => b.Hostname == hostname, token);
@@ -56,51 +73,42 @@ namespace LightShield.Api.Services
                     baseline = new FileActivityBaseline
                     {
                         Hostname = hostname,
-                        FirstSeen = DateTime.UtcNow,
-                        LastUpdated = DateTime.UtcNow,
+                        FirstSeen = hostGroup.Min(e => e.Timestamp),
+                        LastUpdated = now,
                         DetectionEnabled = false
                     };
                     _db.FileActivityBaselines.Add(baseline);
                 }
 
-                // Simple exponential smoothing (stable + explainable)
-                const double alpha = 0.3;
-
-                baseline.CreateAvg = Smooth(baseline.CreateAvg, createRate, alpha);
-                baseline.ModifyAvg = Smooth(baseline.ModifyAvg, modifyRate, alpha);
-                baseline.DeleteAvg = Smooth(baseline.DeleteAvg, deleteRate, alpha);
-                baseline.RenameAvg = Smooth(baseline.RenameAvg, renameRate, alpha);
-
-                baseline.CreateStd = UpdateStd(baseline.CreateStd, createRate, baseline.CreateAvg);
-                baseline.ModifyStd = UpdateStd(baseline.ModifyStd, modifyRate, baseline.ModifyAvg);
-                baseline.DeleteStd = UpdateStd(baseline.DeleteStd, deleteRate, baseline.DeleteAvg);
-                baseline.RenameStd = UpdateStd(baseline.RenameStd, renameRate, baseline.RenameAvg);
-
-                baseline.LastUpdated = DateTime.UtcNow;
+                baseline.CreateAvg = createStats.Mean;
+                baseline.ModifyAvg = modifyStats.Mean;
+                baseline.DeleteAvg = deleteStats.Mean;
+                baseline.RenameAvg = renameStats.Mean;
+                baseline.CreateStd = createStats.StdDev;
+                baseline.ModifyStd = modifyStats.StdDev;
+                baseline.DeleteStd = deleteStats.StdDev;
+                baseline.RenameStd = renameStats.StdDev;
+                baseline.LastUpdated = now;
             }
 
             await _db.SaveChangesAsync(token);
         }
 
-        private static double Smooth(double oldValue, double newValue, double alpha)
+        private static DateTime FloorToMinute(DateTime value) =>
+            new(value.Year, value.Month, value.Day, value.Hour, value.Minute, 0, value.Kind);
+
+        private static (double Mean, double StdDev) RobustStats(double[] values)
         {
-            if (oldValue == 0)
-                return newValue;
-
-            return alpha * newValue + (1 - alpha) * oldValue;
-        }
-
-        private static double UpdateStd(double oldStd, double value, double mean)
-        {
-            var diff = value - mean;
-            var variance = diff * diff;
-
             const double MIN_PERSISTED_STD = 0.05;
-
-            return Math.Max(
-                Math.Sqrt((oldStd * oldStd + variance) / 2),
-                MIN_PERSISTED_STD
-            );
+            var sorted = values.OrderBy(value => value).ToArray();
+            var capIndex = Math.Clamp((int)Math.Floor((sorted.Length - 1) * 0.99), 0, sorted.Length - 1);
+            var cap = sorted[capIndex];
+            var winsorized = values.Select(value => Math.Min(value, cap)).ToArray();
+            var mean = winsorized.Average();
+            var variance = winsorized.Length > 1
+                ? winsorized.Sum(value => Math.Pow(value - mean, 2)) / (winsorized.Length - 1)
+                : 0;
+            return (mean, Math.Max(Math.Sqrt(variance), MIN_PERSISTED_STD));
         }
     }
 }
