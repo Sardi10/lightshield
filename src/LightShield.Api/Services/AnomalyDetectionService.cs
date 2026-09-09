@@ -21,6 +21,7 @@ namespace LightShield.Api.Services
         private const double RANSOMWARE_Z_SINGLE = 3.0;
         private const double RANSOMWARE_Z_COMBINED = 7.0;
         private const double RISK_ALERT_THRESHOLD = 10.0;
+        private const double RISK_DECAY_PER_MINUTE = 1.0 / 30.0;
 
         public AnomalyDetectionService(
             IServiceProvider services,
@@ -47,6 +48,7 @@ namespace LightShield.Api.Services
                     var db = scope.ServiceProvider.GetRequiredService<EventsDbContext>();
 
                     await PruneOldEventsAsync(db, stoppingToken);
+                    await DecayHostRisksAsync(db, stoppingToken);
 
                     await DetectFailedLoginBursts(stoppingToken);
                     await DetectFileTamperBursts(stoppingToken);
@@ -79,6 +81,7 @@ namespace LightShield.Api.Services
                 .ToListAsync(token);
 
             var threshold = Math.Max(1, await configuration.GetFailedLoginThresholdAsync());
+            var activeEventCutoff = DateTime.UtcNow.AddSeconds(-15);
 
             var groupedByHost = events.GroupBy(e => e.Hostname);
 
@@ -91,38 +94,31 @@ namespace LightShield.Api.Services
                 if (count < threshold)
                     continue;
 
-                
-                
-                bool alreadyReported = await db.Anomalies.AnyAsync(a =>
-                    a.Type == "FailedLoginBurst" &&
-                    a.Hostname == hostname &&
-                    a.Timestamp >= cutoff,
-                    token);
-
-                if (alreadyReported)
+                // Historical events still contribute to the rolling burst count,
+                // but only recent activity may start or continue an incident.
+                if (newestEventTime < activeEventCutoff)
                     continue;
-                
 
-                await db.Anomalies.AddAsync(new Anomaly
-                {
-                    Type = "FailedLoginBurst",
-                    Hostname = hostname,
-                    Timestamp = newestEventTime,
-                    Description = $"Failed login burst: {count} attempts in 5 minutes (threshold: {threshold})"
-                }, token);
-
-                await alertWriter.CreateAndSendAlertAsync(
-                    "FailedLoginBurst",
-                    $"Failed login burst detected on {hostname} ({count} attempts in 5 minutes; threshold: {threshold})",
+                await HandleIncidentAsync(
+                    db,
+                    alertWriter,
                     hostname,
-                    "SINGLE");
+                    "FailedLoginBurst",
+                    count,
+                    newestEventTime,
+                    threshold,
+                    token);
 
                 _logger.LogWarning(
                     "FAILED LOGIN BURST host={Host} count={Count}",
                     hostname, count);
             }
 
-            await db.SaveChangesAsync(token);
+            await CloseInactiveIncidentsAsync(
+                db,
+                alertWriter,
+                "FailedLoginBurst",
+                token);
         }
 
 
@@ -252,6 +248,7 @@ namespace LightShield.Api.Services
                         "FileBehaviorAnomaly",
                         creates + modifies + deletes + renames,
                         newestEventTime,
+                        5,
                         token);
                 }
             }
@@ -273,6 +270,7 @@ namespace LightShield.Api.Services
             string type,
             int currentCount,
             DateTime newestEventTime,
+            int minimumEventsForStart,
             CancellationToken token)
         {
             var incident = await db.IncidentStates
@@ -284,8 +282,7 @@ namespace LightShield.Api.Services
                 return;
             }
 
-            const int MIN_EVENTS_FOR_START = 5;
-            if (incident == null && currentCount < MIN_EVENTS_FOR_START)
+            if (incident == null && currentCount < minimumEventsForStart)
                 return;
 
             bool isNewStart = false;
@@ -306,6 +303,8 @@ namespace LightShield.Api.Services
             {
                 incident.IsActive = true;
                 incident.StartTime = newestEventTime;
+                incident.Count = 0;
+                incident.CooldownUntil = null;
                 isNewStart = true;
             }
 
@@ -472,8 +471,7 @@ namespace LightShield.Api.Services
             // --------------------------------------------
             var minutesElapsed = (now - riskState.LastUpdated).TotalMinutes;
 
-            const double DECAY_PER_MINUTE = 1.0 / 30.0; // 1 point every 30 min
-            var decay = minutesElapsed * DECAY_PER_MINUTE;
+            var decay = minutesElapsed * RISK_DECAY_PER_MINUTE;
 
             riskState.RiskScore = Math.Max(0, riskState.RiskScore - decay);
 
@@ -486,6 +484,30 @@ namespace LightShield.Api.Services
             await db.SaveChangesAsync(token);
 
             return riskState.RiskScore;
+        }
+
+        private async Task DecayHostRisksAsync(
+            EventsDbContext db,
+            CancellationToken token)
+        {
+            var now = DateTime.UtcNow;
+            var riskStates = await db.HostRiskStates
+                .Where(h => h.RiskScore > 0)
+                .ToListAsync(token);
+
+            foreach (var riskState in riskStates)
+            {
+                var minutesElapsed = Math.Max(0, (now - riskState.LastUpdated).TotalMinutes);
+                riskState.RiskScore = Math.Max(
+                    0,
+                    riskState.RiskScore - (minutesElapsed * RISK_DECAY_PER_MINUTE));
+                riskState.LastUpdated = now;
+            }
+
+            if (riskStates.Count > 0)
+            {
+                await db.SaveChangesAsync(token);
+            }
         }
     }
 }
