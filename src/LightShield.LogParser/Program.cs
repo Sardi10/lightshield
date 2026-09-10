@@ -1,11 +1,15 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Diagnostics.Eventing.Reader;
 using System.IO;
+using System.Net;
 using System.Net.Http;
+using System.Runtime.Versioning;
 using System.Security;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 using LightShield.Common.Api;
 using LightShield.Common.Models;
 
@@ -15,6 +19,7 @@ namespace LightShield.LogParser
     {
         static readonly string LogFile = @"C:\ProgramData\LightShield\logparser.log";
         static LightShieldApiClient? apiClient;
+        static EventLogWatcher? windowsEventWatcher;
 
         static void Main()
         {
@@ -54,7 +59,11 @@ namespace LightShield.LogParser
                         throw new Exception("apiUrl missing from config");
                     if (!cfg.TryGetValue("apiKey", out var apiKey) || string.IsNullOrWhiteSpace(apiKey))
                         throw new Exception("apiKey missing from config");
-                    apiClient = new LightShieldApiClient(new HttpClient(), apiUrl, apiKey);
+                    apiClient = new LightShieldApiClient(
+                        new HttpClient(),
+                        apiUrl,
+                        apiKey,
+                        @"C:\ProgramData\LightShield\logparser-event-queue.jsonl");
                     Log($"API client initialized: {apiUrl}");
                     return;
                 }
@@ -70,21 +79,18 @@ namespace LightShield.LogParser
         // ------------------------------------------------------------
         // WINDOWS EVENT LOG WATCHER
         // ------------------------------------------------------------
+        [SupportedOSPlatform("windows")]
         static void WatchWindowsSecurityLog()
         {
             try
             {
-                const string logName = "Security";
-
-                if (!EventLog.Exists(logName))
-                {
-                    Log($"EventLog '{logName}' not found");
-                    return;
-                }
-
-                var log = new EventLog(logName);
-                log.EntryWritten += OnWindowsEvent;
-                log.EnableRaisingEvents = true;
+                var query = new EventLogQuery(
+                    "Security",
+                    PathType.LogName,
+                    "*[System[(EventID=4624 or EventID=4625)]]");
+                windowsEventWatcher = new EventLogWatcher(query);
+                windowsEventWatcher.EventRecordWritten += OnWindowsEvent;
+                windowsEventWatcher.Enabled = true;
 
                 Log("Watching Windows Security EventLog");
             }
@@ -98,17 +104,23 @@ namespace LightShield.LogParser
             }
         }
 
-        static void OnWindowsEvent(object sender, EntryWrittenEventArgs e)
+        [SupportedOSPlatform("windows")]
+        static void OnWindowsEvent(object? sender, EventRecordWrittenEventArgs e)
         {
+            if (e.EventException != null)
+            {
+                Log("Windows Event Log watcher error: " + e.EventException);
+                return;
+            }
+
             try
             {
-                long eventId = (long)e.Entry.InstanceId;
-
-                // Only login success/failure
-                if (eventId != 4624 && eventId != 4625)
+                using var record = e.EventRecord;
+                if (record?.Id is not (4624 or 4625))
                     return;
 
-                _ = Task.Run(() => HandleWindowsEvent(e.Entry, eventId));
+                var parsedEvent = ParseWindowsEvent(record);
+                _ = Task.Run(() => HandleWindowsEvent(parsedEvent));
             }
             catch (Exception ex)
             {
@@ -116,29 +128,26 @@ namespace LightShield.LogParser
             }
         }
 
-        static async Task HandleWindowsEvent(EventLogEntry entry, long eventId)
+        static async Task HandleWindowsEvent(WindowsLoginEvent parsedEvent)
         {
             try
             {
-                string raw = entry.Message;
+                bool isSuccess = parsedEvent.EventId == 4624;
 
-                int logonType = ExtractLogonType(raw);
-                bool isSuccess = eventId == 4624;
-
-                if (!ShouldKeepWindowsEvent(isSuccess, logonType))
+                if (!ShouldKeepWindowsEvent(isSuccess, parsedEvent.LogonType))
                     return;
 
                 var evt = new Event
                 {
                     Source = "logparser",
                     OperatingSystem = "windows",
-                    EventId = (int)eventId,
-                    LogonType = logonType,
-                    Username = ExtractUsername(raw),
-                    IPAddress = ExtractIPAddress(raw),
+                    EventId = parsedEvent.EventId,
+                    LogonType = parsedEvent.LogonType,
+                    Username = parsedEvent.Username,
+                    IPAddress = parsedEvent.IPAddress,
                     Type = isSuccess ? "LoginSuccess" : "LoginFailure",
-                    PathOrMessage = raw.Split('\n')[0],
-                    Timestamp = DateTime.UtcNow,
+                    PathOrMessage = $"Windows Security event {parsedEvent.EventId}",
+                    Timestamp = parsedEvent.Timestamp,
                     Hostname = Environment.MachineName,
                     Severity = isSuccess ? "Info" : "Warning"
                 };
@@ -217,29 +226,44 @@ namespace LightShield.LogParser
         // ------------------------------------------------------------
         // HELPERS
         // ------------------------------------------------------------
-        static int ExtractLogonType(string msg)
+        [SupportedOSPlatform("windows")]
+        static WindowsLoginEvent ParseWindowsEvent(EventRecord record)
         {
-            foreach (var line in msg.Split('\n'))
-                if (line.Contains("Logon Type:", StringComparison.OrdinalIgnoreCase) &&
-                    int.TryParse(line.Split(':').Last().Trim(), out int t))
-                    return t;
+            var xml = XDocument.Parse(record.ToXml());
+            XNamespace ns = "http://schemas.microsoft.com/win/2004/08/events/event";
+            var fields = xml.Descendants(ns + "Data")
+                .Where(element => element.Attribute("Name") != null)
+                .ToDictionary(
+                    element => element.Attribute("Name")!.Value,
+                    element => element.Value,
+                    StringComparer.OrdinalIgnoreCase);
 
-            return -1;
+            var logonType = fields.TryGetValue("LogonType", out var rawLogonType) &&
+                int.TryParse(rawLogonType, out var parsedLogonType)
+                    ? parsedLogonType
+                    : -1;
+
+            fields.TryGetValue("TargetUserName", out var username);
+            fields.TryGetValue("IpAddress", out var rawIpAddress);
+
+            return new WindowsLoginEvent(
+                record.Id,
+                logonType,
+                username,
+                NormalizeIPAddress(rawIpAddress),
+                record.TimeCreated?.ToUniversalTime() ?? DateTime.UtcNow);
         }
 
-        static string? ExtractUsername(string msg)
+        static string? NormalizeIPAddress(string? value)
         {
-            foreach (var line in msg.Split('\n'))
-                if (line.Contains("Account Name:", StringComparison.OrdinalIgnoreCase))
-                    return line.Split(':').Last().Trim();
+            if (string.IsNullOrWhiteSpace(value) ||
+                value == "-" ||
+                !IPAddress.TryParse(value, out var address))
+            {
+                return null;
+            }
 
-            return null;
-        }
-
-        static string? ExtractIPAddress(string msg)
-        {
-            var m = Regex.Match(msg, @"\b\d{1,3}(\.\d{1,3}){3}\b");
-            return m.Success ? m.Value : null;
+            return address.ToString();
         }
 
         static bool ShouldKeepWindowsEvent(bool success, int logonType)
@@ -266,5 +290,12 @@ namespace LightShield.LogParser
             Directory.CreateDirectory(@"C:\ProgramData\LightShield");
             File.AppendAllText(LogFile, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {msg}\n");
         }
+
+        sealed record WindowsLoginEvent(
+            int EventId,
+            int LogonType,
+            string? Username,
+            string? IPAddress,
+            DateTime Timestamp);
     }
 }

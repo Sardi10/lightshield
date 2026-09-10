@@ -18,6 +18,9 @@ namespace LightShield.Agent
         static LightShieldApiClient? apiClient;
         static readonly List<FileSystemWatcher> watchers = new();
         static readonly object watcherLock = new();
+        static readonly object deduplicationLock = new();
+        static readonly Dictionary<string, DateTime> recentFileEvents = new(StringComparer.OrdinalIgnoreCase);
+        static readonly TimeSpan FileEventDeduplicationWindow = TimeSpan.FromSeconds(1);
 
         static void Main()
         {
@@ -49,7 +52,11 @@ namespace LightShield.Agent
                         throw new Exception("apiUrl missing from config");
                     if (!cfg.TryGetValue("apiKey", out var apiKey) || string.IsNullOrWhiteSpace(apiKey))
                         throw new Exception("apiKey missing from config");
-                    apiClient = new LightShieldApiClient(new HttpClient(), apiUrl, apiKey);
+                    apiClient = new LightShieldApiClient(
+                        new HttpClient(),
+                        apiUrl,
+                        apiKey,
+                        Path.Combine(LogDir, "agent-event-queue.jsonl"));
                     Log($"API connected → {apiUrl}");
                     return;
                 }
@@ -94,6 +101,7 @@ namespace LightShield.Agent
                         watcher.Deleted += async (s, e) => await OnFileEvent("filedelete", e.FullPath);
                         watcher.Renamed += async (s, e) =>
                             await OnFileEvent("filerename", $"{e.OldFullPath} → {e.FullPath}");
+                        watcher.Error += OnWatcherError;
 
                         watchers.Add(watcher);
                         Log($"Watching: {path}");
@@ -144,6 +152,18 @@ namespace LightShield.Agent
                 try { w.Dispose(); } catch { }
             }
             watchers.Clear();
+        }
+
+        static void OnWatcherError(object sender, ErrorEventArgs e)
+        {
+            var exception = e.GetException();
+            var errorKind = exception is InternalBufferOverflowException
+                ? "buffer overflow"
+                : "watcher error";
+            Log($"TELEMETRY LOSS: File-system {errorKind}: {exception.Message}");
+
+            // Rebuild outside the watcher callback so disposal cannot deadlock it.
+            _ = Task.Run(InitializeWatchers);
         }
 
         // ------------------------------------------------------------
@@ -205,6 +225,7 @@ namespace LightShield.Agent
             {
                 if (IsNoiseFile(path)) return;
                 if (IsNoisePath(path)) return;
+                if (IsDuplicateFileEvent(eventType, path)) return;
 
                 Log($"{eventType} → {path}");
 
@@ -226,6 +247,36 @@ namespace LightShield.Agent
             catch (Exception ex)
             {
                 Log($"Event handler error: {ex}");
+            }
+        }
+
+        static bool IsDuplicateFileEvent(string eventType, string path)
+        {
+            var now = DateTime.UtcNow;
+            var key = $"{eventType}|{path}";
+
+            lock (deduplicationLock)
+            {
+                if (recentFileEvents.TryGetValue(key, out var previous) &&
+                    now - previous < FileEventDeduplicationWindow)
+                {
+                    return true;
+                }
+
+                recentFileEvents[key] = now;
+                if (recentFileEvents.Count > 5_000)
+                {
+                    var staleCutoff = now - FileEventDeduplicationWindow;
+                    foreach (var staleKey in recentFileEvents
+                        .Where(pair => pair.Value < staleCutoff)
+                        .Select(pair => pair.Key)
+                        .ToList())
+                    {
+                        recentFileEvents.Remove(staleKey);
+                    }
+                }
+
+                return false;
             }
         }
 
